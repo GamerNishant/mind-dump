@@ -1,0 +1,130 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  --animate-tile-in: tile-in 260ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-tile-out: tile-out 240ms cubic-bezier(0.4, 0, 1, 1) forwards;
+  --animate-fade-up: fade-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  --animate-pop: pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+
+  @keyframes tile-in {
+    from { opacity: 0; transform: translateY(6px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes tile-out {
+    to { opacity: 0; transform: scale(0.88); filter: blur(2px); }
+  }
+  @keyframes fade-up {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes pop {
+    from { opacity: 0; transform: translateY(-4px) scale(0.97); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
+/* Semantic color tokens — switch per theme, consumed via Tailwind utilities (bg-card, text-ink, ...). */
+:root {
+  --canvas: #f6f6f9;
+  --card: #ffffff;
+  --elevated: #ffffff;
+  --sunken: #eeeef3;
+  --line: #e4e4eb;
+  --line-strong: #d0d0db;
+  --ink: #16161d;
+  --ink-muted: #5c5c6b;
+  --ink-subtle: #6b6b7a;
+  --accent: #6d4aff;
+  --accent-hover: #5b38f0;
+  /* Solid fills carrying white text (contrast ≥ 4.5:1 in both themes). */
+  --accent-solid: #6d4aff;
+  --accent-solid-hover: #5b38f0;
+  --danger-solid: #c8323a;
+  --accent-soft: #efeaff;
+  --accent-ink: #ffffff;
+  --danger: #c42f35;
+  --danger-soft: #fdecec;
+  color-scheme: light;
+}
+
+.dark {
+  --canvas: #0c0c11;
+  --card: #16161e;
+  --elevated: #1e1e28;
+  --sunken: #111118;
+  --line: #2a2a36;
+  --line-strong: #3b3b4a;
+  --ink: #f2f2f7;
+  --ink-muted: #a3a3b5;
+  --ink-subtle: #8e8ea3;
+  --accent: #8b6cff;
+  --accent-hover: #9e85ff;
+  --accent-solid: #6d4aff;
+  --accent-solid-hover: #7a5bff;
+  --danger-solid: #c8323a;
+  --accent-soft: #241d45;
+  --accent-ink: #ffffff;
+  --danger: #ff6369;
+  --danger-soft: #3b1619;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-canvas: var(--canvas);
+  --color-card: var(--card);
+  --color-elevated: var(--elevated);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-subtle: var(--ink-subtle);
+  --color-accent: var(--accent);
+  --color-accent-hover: var(--accent-hover);
+  --color-accent-soft: var(--accent-soft);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-solid: var(--accent-solid);
+  --color-accent-solid-hover: var(--accent-solid-hover);
+  --color-danger-solid: var(--danger-solid);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+}
+
+html {
+  background: var(--canvas);
+  color: var(--ink);
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  @apply font-sans antialiased;
+  min-height: 100dvh;
+  /* viewport-fit=cover: keep content clear of notches in landscape. */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
+}
+
+dialog::backdrop {
+  background: rgb(8 8 14 / 0.55);
+  backdrop-filter: blur(3px);
+}
+
+/* Tiles: allow long-press drag on touch without the OS callout / text selection getting in the way. */
+.tile-touch {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  touch-action: manipulation;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+}

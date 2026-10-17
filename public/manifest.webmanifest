@@ -1,0 +1,11 @@
+{
+  "name": "Mind Dump",
+  "short_name": "Mind Dump",
+  "description": "Dump every thought into a tile, clear it when it's handled.",
+  "start_url": ".",
+  "scope": ".",
+  "display": "standalone",
+  "background_color": "#0c0c11",
+  "theme_color": "#7c5cff",
+  "icons": [{ "src": "favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }]
+}
