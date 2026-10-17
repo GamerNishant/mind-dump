@@ -14,6 +14,8 @@ Empty your head: every thought becomes a tile. Click a tile when it's handled, a
 - **Live sync** across devices through Supabase Realtime. Light, dark and auto themes. Responsive from 320px phones to wide desktops.
 - Shortcuts: <kbd>n</kbd> or <kbd>/</kbd> focuses the composer; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> splits a multi-line dump.
 
+Docs: [DESIGN.md](DESIGN.md) covers architecture and decisions; [FLOW.md](FLOW.md) traces the code from entry to exit.
+
 ## Stack
 
 React 19 · TypeScript · Vite · Tailwind CSS v4 · dnd-kit · Supabase (Auth + Postgres + Realtime) · sonner · Vitest · Playwright
@@ -43,13 +45,13 @@ npm run test:e2e     # browser tests (desktop + mobile), needs: npx playwright i
 npm run build
 ```
 
-Without Supabase env vars, the app runs in **device-only mode**: accounts and dumps are stored in the browser. That's handy for development and testing.
+The committed `.env` points at the live Supabase project, so `npm run dev` uses the real backend. For **device-only mode** (accounts and dumps stored in the browser, with no network needed), create `.env.local` containing `VITE_SUPABASE_URL=` and `VITE_SUPABASE_ANON_KEY=` (both empty). The Playwright suite always runs in device-only mode; `npx playwright test -c playwright.cloud.config.ts` smoke-tests a production build against the real backend.
 
 ## Connect Supabase (free)
 
 1. Create a project at [supabase.com](https://supabase.com) (the free tier is fine).
 2. **SQL Editor → New query**: paste [`supabase/migrations/20261017000000_init.sql`](supabase/migrations/20261017000000_init.sql) and click **Run**.
-3. **Project Settings → API**: copy the **Project URL** and the **anon / publishable key** into `.env.local`:
+3. **Project Settings → API**: copy the **Project URL** and the **anon / publishable key** into `.env`:
    ```
    VITE_SUPABASE_URL=https://xxxx.supabase.co
    VITE_SUPABASE_ANON_KEY=...
@@ -71,7 +73,8 @@ The anon key is meant to be public. Row-level security is what keeps each user's
 
 1. Push to a GitHub repo on branch `main`.
 2. Go to **Settings → Pages → Build and deployment → Source** and choose **GitHub Actions**.
-3. Go to **Settings → Secrets and variables → Actions → Variables** tab and add `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY`. Without them, the site deploys in device-only mode.
+
+The Supabase URL and publishable key are read from the committed `.env` (they are public values), so no repo secrets or variables are needed.
 
 Each push then tests, builds and deploys to `https://<user>.github.io/<repo>/`.
 
