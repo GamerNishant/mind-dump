@@ -1,5 +1,7 @@
 # Mind Dump
 
+**Live:** https://gamernishant.github.io/mind-dump/
+
 Empty your head: every thought becomes a tile. Click a tile when it's handled, and see how many days the rest have been waiting.
 
 ## Features
@@ -45,7 +47,7 @@ npm run test:e2e     # browser tests (desktop + mobile), needs: npx playwright i
 npm run build
 ```
 
-The committed `.env` points at the live Supabase project, so `npm run dev` uses the real backend. For **device-only mode** (accounts and dumps stored in the browser, with no network needed), create `.env.local` containing `VITE_SUPABASE_URL=` and `VITE_SUPABASE_ANON_KEY=` (both empty). The Playwright suite always runs in device-only mode; `npx playwright test -c playwright.cloud.config.ts` smoke-tests a production build against the real backend.
+The committed `.env` points at the live Supabase project, so `npm run dev` uses the real backend. For **device-only mode** (accounts and dumps stored in the browser, with no network needed), create `.env.local` containing `VITE_SUPABASE_URL=` and `VITE_SUPABASE_ANON_KEY=` (both empty). The Playwright suite always runs in device-only mode; `npx playwright test -c playwright.cloud.config.ts` smoke-tests a production build against the real backend, and `-c playwright.live.config.ts` does the same against the deployed site.
 
 ## Connect Supabase (free)
 
