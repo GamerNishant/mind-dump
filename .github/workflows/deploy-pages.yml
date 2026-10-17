@@ -25,18 +25,12 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm test
-      - name: Check Supabase config
-        if: ${{ vars.VITE_SUPABASE_URL == '' || vars.VITE_SUPABASE_ANON_KEY == '' }}
-        run: echo "::warning::VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY repo variables are not set - deploying in device-only mode."
       - name: Build
         run: npm run build
         env:
           # Project pages are served from /<repo>/; a <user>.github.io repo is served from /.
           VITE_BASE: ${{ endsWith(github.event.repository.name, '.github.io') && '/' || format('/{0}/', github.event.repository.name) }}
-          # Public values (the anon key is safe to expose; RLS protects the data).
-          # Set them under Settings → Secrets and variables → Actions → Variables.
-          VITE_SUPABASE_URL: ${{ vars.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ vars.VITE_SUPABASE_ANON_KEY }}
+          # Supabase URL + publishable key come from the committed .env (public values).
       # GitHub Pages has no SPA rewrites; serving the app for unknown paths makes deep links work.
       - run: cp dist/index.html dist/404.html
       - uses: actions/upload-pages-artifact@v3
