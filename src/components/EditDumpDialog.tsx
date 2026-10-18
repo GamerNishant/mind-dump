@@ -144,6 +144,8 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
     setSplitting(false)
     if (!created) return // the dumps store already showed the error
     onDelete(dump, { quiet: true })
+    // The original tile is gone: its open Today items close (reason "deleted").
+    void planner.retireDump(dump.id)
     toast.success(`Split into ${created.length} tiles`)
     onClose()
   }
@@ -247,7 +249,9 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
         </div>
       )}
 
-      {plannerStatus === 'setup' ? null : form ? (
+      {plannerStatus === 'setup' ? null : plannerStatus === 'error' ? (
+        <p className="mt-5 border-t border-line pt-4 text-xs text-ink-subtle">Planner unavailable: Repeat and Bookmark can't be edited right now.</p>
+      ) : form ? (
         <PlanSettingsSection form={form} onChange={(patch) => setForm((f) => (f ? { ...f, ...patch } : f))} />
       ) : (
         <p className="mt-5 border-t border-line pt-4 text-xs text-ink-subtle">Loading Repeat and Bookmark…</p>

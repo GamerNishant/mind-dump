@@ -263,23 +263,26 @@ Why one table: the owner can't easily run a migration every time a feature chang
 
 | `kind` | `day` | id | `data` ([src/domain/plan.ts](src/domain/plan.ts)) |
 |---|---|---|---|
-| `today_item` | planned day | random; routine instances use `stableId('today_item','routine',dumpId,day)` | `TodayItem`: dumpId, title, type block/task, minutes, firstAction, minimum, order, status open/done/skipped, minMet, skips[], carriedFrom, carryCount, routine, habit, doneAt |
+| `today_item` | planned day | random; routine instances use `stableId('today_item','routine',dumpId,day)` (dump ids are unique per user) | `TodayItem`: dumpId, title, type block/task, minutes, firstAction, minimum, order, status open/done/skipped, minMet, skips[], carriedFrom, carryCount, routine, habit, doneAt |
 | `tile_meta` | null | **= the dump's id** | `TileMeta`: repeat weekdays, defaultType/Minutes/Minimum, habit, resumeNote (Bookmark), skipCount, carryCount |
 | `focus_session` | day | random | `FocusSession`: itemId, plannedMin, startedAt, pausedAt/pausedMs, endedAt, minMet, stoppedAt, starter |
-| `hour_log` | day | `stableId('hour_log',day)` | `{ hours: { "4": "study", ... } }` |
-| `day_plan` | day | `stableId('day_plan',day)` | `DayPlan`: morningCheckAt, block1, shutdownAt, blocksDone, floorMet, foodSorted, tomorrowFirst, restartAt |
-| `rule` | null | random | `Rule`: ifText, thenText, reason, active, order |
-| `settings` | null | `stableId('settings')` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded |
+| `hour_log` | day | `stableId('hour_log',userId,day)` | `{ hours: { "4": "study", ... } }` |
+| `day_plan` | day | `stableId('day_plan',userId,day)` | `DayPlan`: morningCheckAt, block1, shutdownAt, blocksDone, floorMet, foodSorted, tomorrowFirst, restartAt |
+| `rule` | null | random; the 15 starter rules use `stableId('rule','seed',userId,i)` | `Rule`: ifText, thenText, reason, active, order |
+| `settings` | null | `stableId('settings',userId)` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded |
 
 ### 8.3 Architecture
 
 - **`PlannerApi`** ([types.ts](src/data/types.ts)) has `list({kinds, sinceDay})`, `upsert`, `insertMissing` (inserts only new ids: `on conflict do nothing`), `remove` and `watch`.
+  - The Supabase `list` pages through results 1000 rows at a time, because PostgREST caps each response at the project's "Max rows".
+  - The Supabase `watch` adds a refetch every 60 s while the page is visible. Realtime DELETE events can't be filtered by user, so they aren't subscribed to, and this refetch is how a delete made on another device shows up.
   - Both backends implement it.
   - A missing table (PostgREST `PGRST205` / `42P01`) becomes a `SetupRequiredError`.
 - **`PlannerStore`** ([plannerStore.ts](src/state/plannerStore.ts)) works the same way as `DumpsStore`:
   - Changes apply optimistically, go to the backend, and roll back with a toast if the backend fails.
   - Requests are chained per document, stale reads are discarded, and watch events trigger a debounced refresh.
   - It holds `docs: Map<id, PlannerDoc>` and `status`, which is `setup` when the table is missing.
+  - It also holds `loadSeq`, which goes up by one with every successful load, and `refreshing`, which is true while a refetch is pending. The rollover uses both to make sure it only acts on fresh data.
   - It loads every kind, but only dated documents from the last 45 days.
 - **`Planner`** ([planner.ts](src/state/planner.ts)) holds the use-cases: add from dump, add text, reorder, complete, skip, focus start/pause/end, hour log, morning check, shutdown, restart, tile meta, rules and settings. The UI calls only these.
 - **Pure logic** ([lib/plan.ts](src/lib/plan.ts), unit-tested): planner days, `stableId`, caps, the Floor and its dots, `planRollover`, hour-log helpers, focus timing.
@@ -301,7 +304,17 @@ Why one table: the owner can't easily run a migration every time a feature chang
 4. **Focus sessions are planner documents.** A block started on the laptop shows on the phone. Elapsed time is computed from timestamps minus pauses.
 5. **The Bookmark** (`tile_meta.resumeNote`) is written at the end of a block or during the morning check. It becomes the next first action whenever the tile is queued.
 6. **Typing an item in Today creates a dump tile too**, so the dump stays the single source.
-7. **Cloud mode needs a one-time setup.** If the table is missing, Today shows a **SetupCard** with the SQL, a copy button and a link to the project's SQL editor.
+7. **Per-user ids for singletons.** `planner_docs.id` is a primary key across the whole table, so the deterministic ids for each user's settings, day plans and hour logs include the user id. They are read back by kind and day, not by id, so documents written under an older id scheme still load (the most recently updated one wins).
+8. **No duplicates.** A tile has at most one live item per day:
+   - Rollover and routine creation skip any tile that already has a live item that day.
+   - Skipping an item to tomorrow, when the tile is already planned for tomorrow, closes this copy instead of moving it.
+   - Bring back closes duplicates and respects the caps. Items that don't fit stay stale.
+9. **Focus stays honest.**
+   - Done or Skip on an item ends its running block.
+   - A block's end time is capped at its planned end, so a dialog left unanswered doesn't log extra hours.
+   - A watcher that is always mounted (`FocusAlarm`) plays the time-up chime and shows a toast even when you're not on `/focus`.
+10. **Tiles that disappear.** Deleting a tile, or splitting it into lines, calls `planner.retireDump`. Its open items then close with the reason "Tile removed".
+11. **Cloud mode needs a one-time setup.** If the table is missing, Today shows a **SetupCard** with the SQL, a copy button and a link to the project's SQL editor.
 
 ### 8.5 How to extend the planner
 

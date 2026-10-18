@@ -36,7 +36,7 @@ export function PlannerProvider({ userId, children }: { userId: string; children
       () => addDays(planDay(new Date()), -HISTORY_DAYS),
       (message) => toast.error(message),
     )
-    return new Planner(store, dumps)
+    return new Planner(store, dumps, userId)
   }, [userId, dumps])
 
   useEffect(() => {
@@ -65,26 +65,38 @@ export function usePlannerState(): PlannerState {
 
 /**
  * Applies the day rollover (carry-overs, routine items, closing unresolved routines) whenever the
- * planner day changes or new data arrives. Each write is attempted once per session, so a
- * failing write can't loop.
+ * planner day changes or new data arrives.
+ *
+ * The rollover writes whole documents computed from local state, so it only runs on fresh data:
+ * never while a refetch is pending (e.g. right after the device wakes up), and only after a load
+ * that happened on the current planner day. Each write is attempted once per load, so a failing
+ * write is retried after the next successful load instead of looping.
  */
 function RolloverRunner({ planner }: { planner: Planner }) {
-  const { docs, status } = usePlannerState()
+  const { docs, status, loadSeq, refreshing } = usePlannerState()
   const { active, activeStatus } = useDumpsState()
   const now = useNow()
   const attempted = useRef(new Set<string>())
+  const loadedOn = useRef<{ day: string; seq: number } | null>(null)
 
   useEffect(() => {
-    if (status !== 'ready' || activeStatus !== 'ready') return
+    if (status !== 'ready' || activeStatus !== 'ready' || refreshing) return
     const today = planDay(now, settingsOf(docs, DEFAULT_SETTINGS).dayStartHour)
+    // First run on a new planner day: reload before acting on what we have.
+    if (loadedOn.current?.day !== today) {
+      loadedOn.current = { day: today, seq: loadSeq }
+      planner.store.refresh()
+      return
+    }
+    if (loadSeq === loadedOn.current.seq) return
     const plan = planRollover({ docs, today, activeDumps: active })
-    const key = (id: string, day: string | null) => `${today}:${id}:${day}`
+    const key = (id: string, day: string | null) => `${loadSeq}:${today}:${id}:${day}`
     const updates = plan.updates.filter((d) => !attempted.current.has(key(d.id, d.day)))
     const creates = plan.creates.filter((d) => !attempted.current.has(key(d.id, d.day)))
     for (const d of [...updates, ...creates]) attempted.current.add(key(d.id, d.day))
     if (updates.length) void planner.store.put(updates, "Couldn't carry over yesterday's items")
     if (creates.length) void planner.store.create(creates, "Couldn't add today's routines")
-  }, [docs, status, active, activeStatus, now, planner])
+  }, [docs, status, loadSeq, refreshing, active, activeStatus, now, planner])
 
   return null
 }

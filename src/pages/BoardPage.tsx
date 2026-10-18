@@ -152,12 +152,15 @@ export function BoardPage() {
   const remove = useCallback(
     (dump: Dump, opts?: { quiet?: boolean }) => {
       const restoreFocus = focusAfterRemoval(dump.id)
-      void store
-        .remove(dump.id)
-        .then((ok) => ok && !opts?.quiet && toast('Dump deleted', { description: preview(dump.content) }))
+      void store.remove(dump.id).then((ok) => {
+        if (!ok) return
+        // The tile is gone: its open Today items leave the queues (reason "deleted").
+        void planner.retireDump(dump.id)
+        if (!opts?.quiet) toast('Dump deleted', { description: preview(dump.content) })
+      })
       restoreFocus()
     },
-    [store, focusAfterRemoval],
+    [store, planner, focusAfterRemoval],
   )
 
   const moveToEdge = useCallback(

@@ -27,6 +27,9 @@ import {
   dayPlanId,
   dayPlanOf,
   docsOfKind,
+  routineCreates,
+  seedRuleId,
+  singleton,
   floorMet,
   hasRoomFor,
   hourLogId,
@@ -47,7 +50,7 @@ import { planMove } from '@/lib/position'
 import type { DumpsStore } from './dumpsStore'
 import type { PlannerStore } from './plannerStore'
 
-export type AddResult = { ok: true; id: string } | { ok: false; reason: 'exists' | 'full' | 'error' }
+export type AddResult = { ok: true; id: string; dumpId: string | null } | { ok: false; reason: 'exists' | 'full' | 'error' }
 
 /**
  * Planner use-cases on top of the generic PlannerStore (and DumpsStore for tiles).
@@ -57,10 +60,12 @@ export type AddResult = { ok: true; id: string } | { ok: false; reason: 'exists'
 export class Planner {
   readonly store: PlannerStore
   private readonly dumps: DumpsStore
+  private readonly userId: string
 
-  constructor(store: PlannerStore, dumps: DumpsStore) {
+  constructor(store: PlannerStore, dumps: DumpsStore, userId: string) {
     this.store = store
     this.dumps = dumps
+    this.userId = userId
   }
 
   // ---- reads ---------------------------------------------------------------
@@ -114,7 +119,7 @@ export class Planner {
       order: orderAtEnd(items),
     })
     const ok = await this.store.put({ id, kind: KIND.todayItem, day, data }, "Couldn't add that to Today")
-    return ok ? { ok: true, id } : { ok: false, reason: 'error' }
+    return ok ? { ok: true, id, dumpId: dump.id } : { ok: false, reason: 'error' }
   }
 
   /** Typing a new item in Today also creates its dump tile, so the dump stays the single source. */
@@ -132,9 +137,9 @@ export class Planner {
   async updateItem(id: string, patch: Partial<Pick<TodayItem, 'title' | 'type' | 'minutes' | 'firstAction' | 'minimum'>>): Promise<boolean> {
     const doc = this.item(id)
     if (!doc) return false
-    if (patch.type === 'block' && doc.data.type !== 'block' && !doc.data.habit) {
+    if (patch.type && patch.type !== doc.data.type && !doc.data.habit && doc.data.status !== 'skipped') {
       const others = itemsForDay(this.docs, doc.day ?? this.today()).filter((i) => i.id !== id)
-      if (!hasRoomFor('block', others, this.settings())) return false
+      if (!hasRoomFor(patch.type, others, this.settings())) return false
     }
     const ok = await this.putItem(doc, patch)
     const { dumpId } = doc.data
@@ -171,10 +176,25 @@ export class Planner {
     )
   }
 
-  complete(id: string, minMet = true): Promise<boolean> {
+  async complete(id: string, minMet = true): Promise<boolean> {
     const doc = this.item(id)
-    if (!doc) return Promise.resolve(false)
+    if (!doc) return false
+    await this.closeSessionFor(id, minMet)
     return this.putItem(doc, { status: 'done', minMet, doneAt: new Date().toISOString() })
+  }
+
+  /** A block running on an item that gets Done/Skipped elsewhere is closed with it. */
+  private async closeSessionFor(itemId: string, minMet: boolean | null): Promise<void> {
+    const running = this.running()
+    if (!running || running.data.itemId !== itemId) return
+    await this.putSession(running, { endedAt: this.cappedEnd(running.data).toISOString(), pausedAt: null, minMet })
+  }
+
+  /** Focus can't outlast its plan: time after the planned end (an unanswered dialog) isn't focus. */
+  private cappedEnd(session: FocusSession, now = new Date()): Date {
+    const pausedMs = session.pausedAt ? session.pausedMs + Math.max(0, now.getTime() - Date.parse(session.pausedAt)) : session.pausedMs
+    const plannedEnd = Date.parse(session.startedAt) + pausedMs + session.plannedMin * 60_000
+    return new Date(Math.min(now.getTime(), plannedEnd))
   }
 
   /** Undo for Done / Skip-to-dump. */
@@ -196,12 +216,18 @@ export class Planner {
     const event = { at: new Date().toISOString(), reason, to }
     const skips = [...doc.data.skips, event]
     const day = doc.day ?? this.today()
+    if (to !== 'later') await this.closeSessionFor(id, false)
     let ok: boolean
     if (to === 'later') {
       ok = await this.putItem(doc, { skips, order: orderAtEnd(itemsForDay(this.docs, day)) })
     } else if (to === 'tomorrow') {
       const tomorrow = addDays(day, 1)
-      ok = await this.putItem(doc, { skips, order: orderAtEnd(itemsForDay(this.docs, tomorrow)) }, { day: tomorrow })
+      const tomorrowItems = itemsForDay(this.docs, tomorrow)
+      const already = !!doc.data.dumpId && tomorrowItems.some((t) => t.data.dumpId === doc.data.dumpId && t.data.status !== 'skipped')
+      ok = already
+        ? // The tile is already planned for tomorrow: close this copy instead of making a second one.
+          await this.putItem(doc, { skips, status: 'skipped' })
+        : await this.putItem(doc, { skips, order: orderAtEnd(tomorrowItems) }, { day: tomorrow })
     } else {
       ok = await this.putItem(doc, { skips, status: 'skipped' })
     }
@@ -287,8 +313,9 @@ export class Planner {
     if (!doc) return false
     const now = new Date()
     const pausedMs = doc.data.pausedAt ? doc.data.pausedMs + Math.max(0, now.getTime() - Date.parse(doc.data.pausedAt)) : doc.data.pausedMs
+    const end = this.cappedEnd(doc.data, now)
     const stoppedAt = result.stoppedAt.trim()
-    const ok = await this.putSession(doc, { endedAt: now.toISOString(), pausedAt: null, pausedMs, minMet: result.minMet, stoppedAt })
+    const ok = await this.putSession(doc, { endedAt: end.toISOString(), pausedAt: null, pausedMs, minMet: result.minMet, stoppedAt })
     if (!ok) return false
 
     const item = doc.data.itemId ? this.item(doc.data.itemId) : null
@@ -306,7 +333,7 @@ export class Planner {
     // Wall-clock span minus pauses ≈ focus; fill the hours it mostly covered (only empty cells).
     const start = new Date(Date.parse(doc.data.startedAt) + pausedMs)
     const byDay = new Map<string, number[]>()
-    for (const { day, hour } of coveredHours(start, now, this.settings().dayStartHour)) {
+    for (const { day, hour } of coveredHours(start, end, this.settings().dayStartHour)) {
       byDay.set(day, [...(byDay.get(day) ?? []), hour])
     }
     for (const [day, hours] of byDay) await this.setHours(day, hours, 'study', { onlyEmpty: true })
@@ -331,7 +358,8 @@ export class Planner {
       }
     }
     if (!changed) return Promise.resolve(true)
-    return this.store.put({ id: hourLogId(day), kind: KIND.hourLog, day, data: { hours: next } }, "Couldn't save the hour log")
+    const id = singleton(this.docs, KIND.hourLog, day)?.id ?? hourLogId(this.userId, day)
+    return this.store.put({ id, kind: KIND.hourLog, day, data: { hours: next } }, "Couldn't save the hour log")
   }
 
   // ---- Day plan: Morning Check, Shutdown, Restart -------------------------------------------
@@ -341,7 +369,8 @@ export class Planner {
   }
 
   private putPlan(day: string, patch: Partial<DayPlan>, error?: string) {
-    return this.store.put({ id: dayPlanId(day), kind: KIND.dayPlan, day, data: { ...this.dayPlan(day), ...patch } }, error)
+    const id = singleton(this.docs, KIND.dayPlan, day)?.id ?? dayPlanId(this.userId, day)
+    return this.store.put({ id, kind: KIND.dayPlan, day, data: { ...this.dayPlan(day), ...patch } }, error)
   }
 
   /** Block 1 = the first block in today's queue. */
@@ -352,9 +381,9 @@ export class Planner {
   async morningCheck(day: string, result: Block1Result | null, stoppedAt: string): Promise<boolean> {
     const note = stoppedAt.trim()
     const block = this.block1(day)
-    if (block && result) {
-      if (result === 'yes') await this.complete(block.id, true)
-      else if (note) await this.putItem(block, { firstAction: resumeAction(note) })
+    if (block) {
+      if (result === 'yes' && block.data.status === 'open') await this.complete(block.id, true)
+      else if (note && block.data.status === 'open') await this.putItem(block, { firstAction: resumeAction(note) })
       if (note && block.data.dumpId) await this.store.put(this.metaDoc({ ...this.meta(block.data.dumpId), resumeNote: note }))
     }
     return this.putPlan(day, {
@@ -382,17 +411,61 @@ export class Planner {
     return ok && (await this.putPlan(day, { restartAt: at }))
   }
 
-  /** Bring old open items into today instead of restarting. */
-  bringBack(day: string, staleIds: string[]): Promise<boolean> {
-    let order = orderAtEnd(itemsForDay(this.docs, day))
-    const writes = staleIds
-      .map((id) => this.item(id))
-      .filter((d): d is Doc<TodayItem> => !!d && d.data.status === 'open')
-      .map((d) => {
-        order += 1024
-        return { id: d.id, kind: KIND.todayItem, day, data: { ...d.data, carriedFrom: d.day, carryCount: d.data.carryCount + 1, order } }
-      })
-    return this.store.put(writes)
+  /**
+   * Bring old open items into today instead of restarting, up to the caps. Items whose tile is
+   * already in today close as duplicates; items that don't fit stay where they are (still stale).
+   * Resolves to how many were brought in and how many didn't fit.
+   */
+  async bringBack(day: string, staleIds: string[]): Promise<{ brought: number; left: number }> {
+    const todays = itemsForDay(this.docs, day)
+    const live: Array<Doc<TodayItem>> = [...todays]
+    const occupied = new Set(todays.filter((t) => t.data.status !== 'skipped' && t.data.dumpId).map((t) => t.data.dumpId!))
+    const settings = this.settings()
+    const at = new Date().toISOString()
+    let order = orderAtEnd(todays)
+    let left = 0
+    let brought = 0
+    const writes: PlannerDocInput[] = []
+    for (const d of staleIds.map((id) => this.item(id))) {
+      if (!d || d.data.status !== 'open') continue
+      if (d.data.dumpId && occupied.has(d.data.dumpId)) {
+        const skip = { at, reason: 'unresolved' as const, to: 'tomorrow' as const }
+        writes.push({ id: d.id, kind: KIND.todayItem, day: d.day, data: { ...d.data, status: 'skipped', skips: [...d.data.skips, skip] } })
+        continue
+      }
+      if (!d.data.habit && !hasRoomFor(d.data.type, live, settings)) {
+        left++
+        continue
+      }
+      order += 1024
+      const moved: Doc<TodayItem> = { ...d, day, data: { ...d.data, carriedFrom: d.day, carryCount: d.data.carryCount + 1, order } }
+      live.push(moved)
+      if (d.data.dumpId) occupied.add(d.data.dumpId)
+      writes.push({ id: moved.id, kind: KIND.todayItem, day, data: moved.data })
+      brought++
+    }
+    await this.store.put(writes)
+    return { brought, left }
+  }
+
+  /** Create `day`'s routine items now (Shutdown plans tomorrow with its routines in place). */
+  prepareRoutines(day: string): Promise<boolean> {
+    const active = this.dumps.getState().active
+    return this.store.create(routineCreates(this.docs, day, active), "Couldn't add tomorrow's routines")
+  }
+
+  /** A tile was deleted or split: its open items leave the queues (with a recorded reason). */
+  async retireDump(dumpId: string): Promise<void> {
+    const at = new Date().toISOString()
+    const writes: PlannerDocInput[] = docsOfKind<TodayItem>(this.docs, KIND.todayItem)
+      .filter((d) => d.data.dumpId === dumpId && d.data.status === 'open')
+      .map((d) => ({
+        id: d.id,
+        kind: KIND.todayItem,
+        day: d.day,
+        data: { ...d.data, status: 'skipped', skips: [...d.data.skips, { at, reason: 'deleted', to: 'dump' }] },
+      }))
+    if (writes.length) await this.store.put(writes)
   }
 
   // ---- Tiles: repeat + bookmark ---------------------------------------------------------------
@@ -415,14 +488,15 @@ export class Planner {
   async seedRules(): Promise<void> {
     const settings = this.settings()
     if (settings.rulesSeeded || this.store.getState().status !== 'ready') return
+    // Deterministic ids + insert-if-missing: two devices seeding at once can't duplicate them.
     const docs: PlannerDocInput[] = SEED_RULES.map((r, i) => ({
-      id: newId(),
+      id: seedRuleId(this.userId, i),
       kind: KIND.rule,
       day: null,
       data: { ...r, active: true, order: i * 1024 } satisfies Rule,
     }))
-    if (this.rules().length === 0) await this.store.put(docs, "Couldn't add the starter rules")
-    await this.updateSettings({ rulesSeeded: true })
+    const ok = this.rules().length > 0 || (await this.store.create(docs, "Couldn't add the starter rules"))
+    if (ok) await this.updateSettings({ rulesSeeded: true })
   }
 
   saveRule(id: string | null, rule: Omit<Rule, 'order'> & { order?: number }): Promise<boolean> {
@@ -436,6 +510,7 @@ export class Planner {
   }
 
   updateSettings(patch: Partial<PlanSettings>): Promise<boolean> {
-    return this.store.put({ id: settingsId(), kind: KIND.settings, day: null, data: { ...this.settings(), ...patch } }, "Couldn't save settings")
+    const id = singleton(this.docs, KIND.settings, null)?.id ?? settingsId(this.userId)
+    return this.store.put({ id, kind: KIND.settings, day: null, data: { ...this.settings(), ...patch } }, "Couldn't save settings")
   }
 }

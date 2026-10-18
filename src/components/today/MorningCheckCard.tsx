@@ -2,6 +2,7 @@ import { useId, useState } from 'react'
 import { ArrowRight, Check, Sunrise, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, focusRing } from '@/components/ui'
+import { ChoiceChips } from '@/components/today/SkipSheet'
 import type { Block1Result } from '@/domain/plan'
 import { cn } from '@/lib/cn'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
@@ -9,7 +10,7 @@ import { usePlanner, type TodayView } from '@/state/PlannerProvider'
 /** The check is offered from the start of the planner day until 2 PM. */
 const CHECK_UNTIL_HOUR = 14
 
-const RESULTS: Array<{ value: Block1Result; label: string }> = [
+const RESULTS: ReadonlyArray<{ value: Block1Result; label: string }> = [
   { value: 'yes', label: 'Yes' },
   { value: 'partly', label: 'Partly' },
   { value: 'no', label: 'No' },
@@ -61,14 +62,19 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
 
   const finish = async (withResult: boolean) => {
     setBusy(true)
-    const ok = await planner.morningCheck(view.today, withResult && block ? chosen : null, withResult ? stoppedAt : '')
+    // The typed note is saved even when dismissing; only a typed (non-null) note counts there.
+    const ok = await planner.morningCheck(
+      view.today,
+      withResult && block ? chosen : null,
+      withResult ? stoppedAt : (note ?? ''),
+    )
     setBusy(false)
     if (ok && withResult) toast.success('Morning Check done. Floor today: Block 1 + Shutdown.')
   }
 
   const notToday = async (id: string, title: string) => {
     setConfirming(null)
-    const ok = await planner.skip(id, 'didnt_want', 'dump')
+    const ok = await planner.skip(id, 'not_today', 'dump')
     if (ok)
       toast.success('Back to the dump', {
         description: title,
@@ -99,7 +105,7 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
         onClick={() => void finish(false)}
         disabled={busy}
         className={cn(
-          'absolute top-3 right-3 grid size-8 place-items-center rounded-lg text-ink-subtle hover:bg-sunken hover:text-ink',
+          'absolute top-3 right-3 grid size-8 place-items-center pointer-coarse:size-10 rounded-lg text-ink-subtle hover:bg-sunken hover:text-ink',
           focusRing,
         )}
         aria-label="Dismiss Morning Check"
@@ -111,32 +117,17 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
         {current === 'block1' &&
           (block ? (
             <div className="space-y-4">
-              <fieldset>
-                <legend className="text-sm font-medium text-ink">Block 1: minimum met?</legend>
-                <p className="mt-0.5 truncate text-sm text-ink-muted">{block.data.title}</p>
+              <div>
+                <p className="truncate text-sm font-medium text-ink">Block 1: {block.data.title}</p>
                 {block.data.minimum && <p className="text-xs text-ink-subtle">Minimum: {block.data.minimum}</p>}
-                <div className="mt-2.5 flex flex-wrap gap-2" role="radiogroup" aria-label="Block 1 minimum met?">
-                  {RESULTS.map((r) => (
-                    <button
-                      key={r.value}
-                      type="button"
-                      role="radio"
-                      aria-checked={chosen === r.value}
-                      onClick={() => setResult(r.value)}
-                      className={cn(
-                        'inline-flex h-10 min-w-20 items-center justify-center gap-1.5 rounded-xl border px-4 text-sm font-medium transition-colors',
-                        focusRing,
-                        chosen === r.value
-                          ? 'border-accent bg-accent-soft text-accent'
-                          : 'border-line bg-card text-ink hover:border-line-strong hover:bg-sunken',
-                      )}
-                    >
-                      {chosen === r.value && <Check className="size-4" aria-hidden />}
-                      {r.label}
-                    </button>
-                  ))}
-                </div>
-              </fieldset>
+                <ChoiceChips
+                  label="Block 1 minimum met?"
+                  options={RESULTS}
+                  value={chosen}
+                  onChange={setResult}
+                  className="mt-2.5"
+                />
+              </div>
               <div>
                 <label htmlFor={noteId} className="block text-sm font-medium text-ink">
                   Stopped at?
@@ -180,16 +171,17 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
                     </span>
                     {confirming === item.id ? (
                       <span className="flex gap-1.5">
-                        <Button size="sm" variant="ghost" onClick={() => setConfirming(null)}>
+                        <Button className="pointer-coarse:h-10" size="sm" variant="ghost" onClick={() => setConfirming(null)}>
                           Cancel
                         </Button>
-                        <Button size="sm" variant="danger-ghost" onClick={() => void notToday(item.id, item.data.title)}>
+                        <Button className="pointer-coarse:h-10" size="sm" variant="danger-ghost" onClick={() => void notToday(item.id, item.data.title)}>
                           Not today
                         </Button>
                       </span>
                     ) : (
                       <span className="flex gap-1.5">
                         <Button
+                          className="pointer-coarse:h-10"
                           size="sm"
                           variant={isKept ? 'ghost' : 'secondary'}
                           aria-pressed={isKept}
@@ -198,7 +190,7 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
                           {isKept && <Check aria-hidden />}
                           {isKept ? 'Kept' : 'Keep'}
                         </Button>
-                        <Button size="sm" variant="ghost" onClick={() => setConfirming(item.id)}>
+                        <Button className="pointer-coarse:h-10" size="sm" variant="ghost" onClick={() => setConfirming(item.id)}>
                           Back to dump
                         </Button>
                       </span>
@@ -227,23 +219,23 @@ export function MorningCheckCard({ view }: { view: TodayView }) {
           type="button"
           onClick={() => void finish(false)}
           disabled={busy}
-          className={cn('rounded-md px-1 text-sm text-ink-subtle hover:text-ink disabled:opacity-50', focusRing)}
+          className={cn('rounded-md px-1 text-sm text-ink-subtle pointer-coarse:h-10 pointer-coarse:px-2 hover:text-ink disabled:opacity-50', focusRing)}
         >
           Skip check
         </button>
         <div className="flex gap-2">
           {index > 0 && (
-            <Button variant="ghost" size="sm" onClick={() => setStep(steps[index - 1])} disabled={busy}>
+            <Button className="pointer-coarse:h-10" variant="ghost" size="sm" onClick={() => setStep(steps[index - 1])} disabled={busy}>
               Back
             </Button>
           )}
           {current === 'floor' ? (
-            <Button size="sm" onClick={() => void finish(true)} loading={busy}>
+            <Button className="pointer-coarse:h-10" size="sm" onClick={() => void finish(true)} loading={busy}>
               <Check aria-hidden />
               Done
             </Button>
           ) : (
-            <Button size="sm" onClick={next} disabled={busy}>
+            <Button className="pointer-coarse:h-10" size="sm" onClick={next} disabled={busy}>
               Next
               <ArrowRight aria-hidden />
             </Button>

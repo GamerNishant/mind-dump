@@ -9,9 +9,16 @@ export interface PlannerState {
   /** Every loaded document by id. Replaced (never mutated) on change, so it works as a memo key. */
   docs: ReadonlyMap<string, PlannerDoc>
   status: PlannerStatus
+  /** Bumped by every successful load: "the docs were just read from the backend". */
+  loadSeq: number
+  /**
+   * A refetch is pending (another device/tab may have changed data, or the app was woken up).
+   * Writes computed from `docs` alone (the day rollover) wait until it has landed.
+   */
+  refreshing: boolean
 }
 
-const initialState: PlannerState = { docs: new Map(), status: 'idle' }
+const initialState: PlannerState = { docs: new Map(), status: 'idle', loadSeq: 0, refreshing: false }
 
 /**
  * Client-side source of truth for one user's planner documents. Same model as DumpsStore:
@@ -68,8 +75,14 @@ export class PlannerStore {
     try {
       const docs = await this.api.list({ kinds: this.kinds, sinceDay: this.sinceDay() })
       if (version !== this.version || this.inflight > 0) return this.scheduleRefresh()
-      this.setState({ docs: new Map(docs.map((d) => [d.id, d])), status: 'ready' })
+      this.setState((s) => ({
+        docs: new Map(docs.map((d) => [d.id, d])),
+        status: 'ready',
+        loadSeq: s.loadSeq + 1,
+        refreshing: this.refreshQueued,
+      }))
     } catch (error) {
+      if (this.state.refreshing) this.setState({ refreshing: false })
       if (error instanceof SetupRequiredError) {
         this.setState({ status: 'setup' })
         return
@@ -140,6 +153,7 @@ export class PlannerStore {
   // ---- internals -----------------------------------------------------------
 
   private scheduleRefresh(): void {
+    if (!this.state.refreshing) this.setState({ refreshing: true })
     if (this.inflight > 0) {
       this.refreshQueued = true
       return

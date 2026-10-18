@@ -88,9 +88,12 @@ export function stableId(...parts: string[]): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16)}${hex.slice(17, 20)}-${hex.slice(20, 32)}`
 }
 
-export const dayPlanId = (day: string) => stableId(KIND.dayPlan, day)
-export const hourLogId = (day: string) => stableId(KIND.hourLog, day)
-export const settingsId = () => stableId(KIND.settings)
+// `planner_docs.id` is a global primary key, so per-user singletons must include the user id.
+export const dayPlanId = (userId: string, day: string) => stableId(KIND.dayPlan, userId, day)
+export const hourLogId = (userId: string, day: string) => stableId(KIND.hourLog, userId, day)
+export const settingsId = (userId: string) => stableId(KIND.settings, userId)
+export const seedRuleId = (userId: string, index: number) => stableId(KIND.rule, 'seed', userId, String(index))
+/** Dump ids are already unique per user. */
 export const routineItemId = (dumpId: string, day: string) => stableId(KIND.todayItem, 'routine', dumpId, day)
 
 // ---- typed views over the docs map --------------------------------------------
@@ -121,19 +124,29 @@ export function tileMetaMap(docs: Docs): Map<string, TileMeta> {
   return map
 }
 
+/**
+ * The singleton document of a kind (and day). Looked up by kind/day rather than id, since only
+ * the signed-in user's documents are loaded; if several exist, the most recently updated wins.
+ */
+export function singleton<T>(docs: Docs, kind: string, day: string | null): Doc<T> | undefined {
+  let best: Doc<T> | undefined
+  for (const d of docs.values()) {
+    if (d.kind !== kind || d.day !== day) continue
+    if (!best || d.updatedAt > best.updatedAt) best = d as Doc<T>
+  }
+  return best
+}
+
 export function settingsOf(docs: Docs, fallback: PlanSettings): PlanSettings {
-  const doc = docs.get(settingsId()) as Doc<Partial<PlanSettings>> | undefined
-  return { ...fallback, ...doc?.data }
+  return { ...fallback, ...singleton<Partial<PlanSettings>>(docs, KIND.settings, null)?.data }
 }
 
 export function dayPlanOf(docs: Docs, day: string, empty: () => DayPlan): DayPlan {
-  const doc = docs.get(dayPlanId(day)) as Doc<Partial<DayPlan>> | undefined
-  return { ...empty(), ...doc?.data }
+  return { ...empty(), ...singleton<Partial<DayPlan>>(docs, KIND.dayPlan, day)?.data }
 }
 
 export function hourLogOf(docs: Docs, day: string): HourLog {
-  const doc = docs.get(hourLogId(day)) as Doc<Partial<HourLog>> | undefined
-  return { hours: { ...doc?.data?.hours } }
+  return { hours: { ...singleton<Partial<HourLog>>(docs, KIND.hourLog, day)?.data?.hours } }
 }
 
 /** The running (not ended) focus session, newest first if several exist. */
@@ -257,13 +270,17 @@ export function planRollover({ docs, today, activeDumps }: RolloverInput): Rollo
   const all = docsOfKind<TodayItem>(docs, KIND.todayItem)
   const todays = all.filter((d) => d.day === today)
   let carryOrder = orderAtEnd(todays)
+  // Tiles that already have a live item today: never give them a second one.
+  const occupied = new Set(todays.filter((t) => t.data.status !== 'skipped' && t.data.dumpId).map((t) => t.data.dumpId!))
 
   for (const doc of all) {
     if (!doc.day || doc.day >= today || doc.data.status !== 'open') continue
-    if (doc.data.routine) {
-      const skip = { at, reason: 'unresolved' as const, to: 'dump' as const }
+    const duplicate = !!doc.data.dumpId && occupied.has(doc.data.dumpId)
+    if (doc.data.routine || (duplicate && doc.day === yesterday)) {
+      const skip = { at, reason: 'unresolved' as const, to: duplicate ? ('tomorrow' as const) : ('dump' as const) }
       updates.push({ ...doc, data: { ...doc.data, status: 'skipped', skips: [...doc.data.skips, skip] } })
     } else if (doc.day === yesterday) {
+      if (doc.data.dumpId) occupied.add(doc.data.dumpId)
       const carryCount = doc.data.carryCount + 1
       updates.push({ ...doc, day: today, data: { ...doc.data, carriedFrom: yesterday, carryCount, order: carryOrder } })
       carryOrder += POSITION_STEP
@@ -278,13 +295,35 @@ export function planRollover({ docs, today, activeDumps }: RolloverInput): Rollo
     if (meta.carryCount !== carryCount) updates.push({ id: dumpId, kind: KIND.tileMeta, day: null, data: { ...meta, carryCount } })
   }
 
-  const weekday = weekdayOf(today)
+  creates.push(...routineCreates(docs, today, activeDumps, occupied))
+  stale.sort((a, b) => (a.day ?? '').localeCompare(b.day ?? '') || byOrder(a, b))
+  return { updates, creates, stale }
+}
+
+/**
+ * Routine items for recurring tiles due on `day` that don't have one yet: neither the
+ * deterministic routine id nor any live item for the same tile that day (`occupied`).
+ * Used by the rollover (for today) and by Shutdown (to prepare tomorrow early).
+ */
+export function routineCreates(
+  docs: Docs,
+  day: string,
+  activeDumps: ReadonlyArray<{ id: string; content: string }>,
+  occupied: ReadonlySet<string> = new Set(
+    itemsForDay(docs, day)
+      .filter((t) => t.data.status !== 'skipped' && t.data.dumpId)
+      .map((t) => t.data.dumpId!),
+  ),
+): PlannerDocInput[] {
+  const metas = tileMetaMap(docs)
+  const weekday = weekdayOf(day)
   const due = activeDumps.filter((d) => metas.get(d.id)?.repeat?.includes(weekday))
-  let routineOrder = orderAtStart(todays) - POSITION_STEP * due.length
+  const creates: PlannerDocInput[] = []
+  let routineOrder = orderAtStart(itemsForDay(docs, day)) - POSITION_STEP * due.length
   for (const dump of due) {
-    const id = routineItemId(dump.id, today)
+    const id = routineItemId(dump.id, day)
     routineOrder += POSITION_STEP
-    if (docs.has(id)) continue
+    if (docs.has(id) || occupied.has(dump.id)) continue
     const meta = metas.get(dump.id)!
     const item = newItem({
       dumpId: dump.id,
@@ -297,11 +336,9 @@ export function planRollover({ docs, today, activeDumps }: RolloverInput): Rollo
       routine: true,
       habit: meta.habit,
     })
-    creates.push({ id, kind: KIND.todayItem, day: today, data: item })
+    creates.push({ id, kind: KIND.todayItem, day, data: item })
   }
-
-  stale.sort((a, b) => (a.day ?? '').localeCompare(b.day ?? '') || byOrder(a, b))
-  return { updates, creates, stale }
+  return creates
 }
 
 // ---- hour log ---------------------------------------------------------------------------

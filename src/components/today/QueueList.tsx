@@ -71,7 +71,7 @@ function useItemActions(view: TodayView) {
 
     async completeBlock(item: Item, minMet: boolean) {
       if (!minMet) {
-        toast('Logged. It stays in the queue.', { description: 'Start it again at its minimum, or Skip it with a reason.' })
+        toast('Not done. It stays in the queue.', { description: 'Start it again at its minimum, or Skip it with a reason.' })
         return
       }
       if (!(await planner.complete(item.id, true))) return
@@ -527,6 +527,18 @@ function QueueRow({ item, isNext, running, confirming, actions, onDone, onAnswer
   const { data } = item
   const isBlock = data.type === 'block'
   const title = preview(data.title, 80)
+  const doneRef = useRef<HTMLButtonElement>(null)
+
+  // When the Minimum-met prompt closes without completing the row, hand focus back to its Done button.
+  const refocusDone = () => requestAnimationFrame(() => doneRef.current?.focus({ preventScroll: true }))
+  const answer = (met: boolean) => {
+    onAnswer(met)
+    if (!met) refocusDone()
+  }
+  const cancelConfirm = () => {
+    onCancelConfirm()
+    refocusDone()
+  }
 
   return (
     <li
@@ -555,6 +567,7 @@ function QueueRow({ item, isNext, running, confirming, actions, onDone, onAnswer
         </button>
 
         <button
+          ref={doneRef}
           type="button"
           onClick={onDone}
           aria-label={`Done: ${title}`}
@@ -597,7 +610,7 @@ function QueueRow({ item, isNext, running, confirming, actions, onDone, onAnswer
             </div>
           </div>
 
-          {confirming && <MinMetPrompt onAnswer={onAnswer} onCancel={onCancelConfirm} />}
+          {confirming && <MinMetPrompt onAnswer={answer} onCancel={cancelConfirm} />}
         </div>
       </div>
     </li>

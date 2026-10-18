@@ -8,7 +8,7 @@ import { cn } from '@/lib/cn'
 import { hasRoomFor } from '@/lib/plan'
 import { matchesQuery } from '@/lib/sort'
 import { preview } from '@/lib/text'
-import { useDumpsState } from '@/state/DumpsProvider'
+import { useDumpsState, useDumpsStore } from '@/state/DumpsProvider'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
 import type { AddResult } from '@/state/planner'
 
@@ -19,6 +19,7 @@ const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`
 /** Type a new Today item (also creates its tile), or pick one from the dump. */
 export function AddItemForm({ view }: { view: TodayView }) {
   const planner = usePlanner()
+  const dumps = useDumpsStore()
   const [text, setText] = useState('')
   const [type, setType] = useState<ItemType>('task')
   const [busy, setBusy] = useState(false)
@@ -28,11 +29,16 @@ export function AddItemForm({ view }: { view: TodayView }) {
   const blocksLeft = Math.max(0, view.settings.blockCap - view.usage.blocks)
   const tasksLeft = Math.max(0, view.settings.taskCap - view.usage.tasks)
 
-  const announce = (result: AddResult, title: string) => {
+  /** `createdTile`: the add also created a new dump tile (typed items), so Undo removes that too. */
+  const announce = (result: AddResult, title: string, createdTile = false) => {
     if (result.ok) {
+      const undo = async () => {
+        const removed = await planner.removeItem(result.id)
+        if (removed && createdTile && result.dumpId) await dumps.remove(result.dumpId)
+      }
       toast.success('Added to Today', {
         description: preview(title),
-        action: { label: 'Undo', onClick: () => void planner.removeItem(result.id) },
+        action: { label: 'Undo', onClick: () => void undo() },
       })
     } else if (result.reason === 'full') {
       toast(FULL)
@@ -52,7 +58,7 @@ export function AddItemForm({ view }: { view: TodayView }) {
     setBusy(true)
     const result = await planner.addText(value, type)
     setBusy(false)
-    announce(result, value)
+    announce(result, value, true)
     if (result.ok) {
       setText('')
       inputRef.current?.focus()
@@ -101,7 +107,7 @@ export function AddItemForm({ view }: { view: TodayView }) {
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
         <p id="add-capacity" className="text-xs text-ink-subtle">
           Room left: {plural(blocksLeft, 'block')} · {plural(tasksLeft, 'task')}{' '}
-          <span className="text-ink-subtle/80">
+          <span className="text-ink-subtle">
             (max {view.settings.blockCap} · {view.settings.taskCap})
           </span>
         </p>

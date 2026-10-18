@@ -7,16 +7,31 @@ import { cn } from '@/lib/cn'
 import { hourLogOf, hourSummary, stripHours } from '@/lib/plan'
 import { usePlanner, usePlannerState, useToday } from '@/state/PlannerProvider'
 
-/** Cell fill per category. Translucent palette colours read on both the light and dark card. */
-const CATEGORY_STYLE: Record<HourCategory, { fill: string; text: string }> = {
-  study: { fill: 'bg-emerald-500/80', text: 'text-white' },
-  phone: { fill: 'bg-rose-500/70', text: 'text-white' },
-  sleep: { fill: 'bg-indigo-500/70', text: 'text-white' },
-  food: { fill: 'bg-amber-500/70', text: 'text-zinc-950' },
-  build: { fill: 'bg-violet-500/70', text: 'text-white' },
-  chores: { fill: 'bg-sky-500/70', text: 'text-zinc-950' },
-  leisure: { fill: 'bg-fuchsia-500/60', text: 'text-white' },
-  other: { fill: 'bg-zinc-400/60', text: 'text-zinc-950' },
+/**
+ * Cell fill per category: solid -700 shades so white text stays at about 5:1 or better in both
+ * themes. Colour is never the only cue: each filled cell also shows the category's initial.
+ */
+const CATEGORY_FILL: Record<HourCategory, string> = {
+  study: 'bg-emerald-700',
+  phone: 'bg-rose-700',
+  sleep: 'bg-indigo-700',
+  food: 'bg-amber-700',
+  build: 'bg-violet-700',
+  chores: 'bg-sky-700',
+  leisure: 'bg-fuchsia-700',
+  other: 'bg-zinc-600',
+}
+
+/** One letter per category, shown in filled cells and the legend. Sleep is Z (S is Study). */
+const CATEGORY_INITIAL: Record<HourCategory, string> = {
+  study: 'S',
+  phone: 'P',
+  sleep: 'Z',
+  food: 'F',
+  build: 'B',
+  chores: 'C',
+  leisure: 'L',
+  other: 'O',
 }
 
 /** Short names for chips and the summary line ("Phone 4h", not "Phone / random 4h"). */
@@ -158,8 +173,8 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
         >
           <p className="text-xs text-ink-muted">
             Tap hours to select them, then pick what they were.{' '}
-            <span className="max-sm:hidden">Shift-click selects a range.</span>
-            <span className="sm:hidden">Long-press selects a range.</span>
+            <span className="pointer-coarse:hidden">Shift-click selects a range.</span>
+            <span className="pointer-fine:hidden">Long-press selects a range.</span>
           </p>
 
           <div role="group" aria-label="Hours of the day" className="mt-3 grid grid-cols-8 gap-1 sm:grid-cols-12">
@@ -167,7 +182,6 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
               const category = log.hours[String(hour)]
               const future = isFuture(index)
               const isSelected = selectedSet.has(hour)
-              const style = category ? CATEGORY_STYLE[category] : null
               return (
                 <button
                   key={hour}
@@ -182,16 +196,21 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
                   onPointerCancel={cancelPress}
                   onContextMenu={(e) => e.preventDefault()}
                   className={cn(
-                    'relative h-10 min-w-0 touch-manipulation rounded-lg text-[11px] font-medium tabular-nums select-none [-webkit-touch-callout:none]',
+                    'relative flex h-10 min-w-0 touch-manipulation flex-col items-center justify-center rounded-lg text-[11px] leading-none font-medium tabular-nums select-none [-webkit-touch-callout:none]',
                     'transition-[box-shadow,transform,opacity] duration-100 motion-reduce:transition-none',
                     focusRing,
-                    style ? cn(style.fill, style.text) : 'border border-line bg-sunken text-ink-muted',
+                    category ? cn(CATEGORY_FILL[category], 'text-white') : 'border border-line bg-sunken text-ink-muted',
                     future ? 'cursor-default border-dashed opacity-40' : 'hover:brightness-105 active:scale-95 motion-reduce:active:scale-100',
                     isSelected && 'ring-2 ring-accent ring-offset-2 ring-offset-card',
                     index === nowIndex && !isSelected && 'outline-2 outline-offset-1 outline-line-strong outline-dashed',
                   )}
                 >
-                  {shortHour(hour)}
+                  <span aria-hidden>{shortHour(hour)}</span>
+                  {category && (
+                    <span aria-hidden className="mt-0.5 text-[10px] font-bold tracking-wide">
+                      {CATEGORY_INITIAL[category]}
+                    </span>
+                  )}
                 </button>
               )
             })}
@@ -212,18 +231,18 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
                     type="button"
                     onClick={() => apply(c)}
                     className={cn(
-                      'inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-card pr-3 pl-2 text-sm text-ink hover:border-line-strong hover:bg-sunken',
+                      'inline-flex h-9 items-center gap-1.5 rounded-full border border-line bg-card pr-3 pl-1.5 text-sm text-ink hover:border-line-strong hover:bg-sunken pointer-coarse:h-10',
                       focusRing,
                     )}
                   >
-                    <span className={cn('size-3 rounded-full', CATEGORY_STYLE[c].fill)} aria-hidden />
+                    <CategoryBadge category={c} className="size-5 rounded-full" />
                     {SHORT_LABEL[c]}
                   </button>
                 ))}
                 <button
                   type="button"
                   onClick={() => apply(null)}
-                  className={cn('inline-flex h-9 items-center rounded-full px-3 text-sm text-ink-muted hover:bg-sunken hover:text-ink', focusRing)}
+                  className={cn('inline-flex h-9 items-center rounded-full px-3 text-sm text-ink-muted hover:bg-sunken hover:text-ink pointer-coarse:h-10', focusRing)}
                 >
                   Clear
                 </button>
@@ -234,7 +253,7 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
           <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1" aria-label="Legend">
             {HOUR_CATEGORIES.map((c) => (
               <li key={c} className="inline-flex items-center gap-1.5 text-xs text-ink-muted">
-                <span className={cn('size-2.5 rounded-sm', CATEGORY_STYLE[c].fill)} aria-hidden />
+                <CategoryBadge category={c} className="size-4 rounded" />
                 {HOUR_CATEGORY_LABEL[c]}
               </li>
             ))}
@@ -251,5 +270,17 @@ export function HourLogStrip({ day, defaultOpen = false }: { day: string; defaul
         </div>
       )}
     </section>
+  )
+}
+
+/** The category's colour swatch with its initial, as in the hour cells. Decorative: a name sits beside it. */
+function CategoryBadge({ category, className }: { category: HourCategory; className?: string }) {
+  return (
+    <span
+      aria-hidden
+      className={cn('inline-grid shrink-0 place-items-center text-[10px] leading-none font-bold text-white', CATEGORY_FILL[category], className)}
+    >
+      {CATEGORY_INITIAL[category]}
+    </span>
   )
 }

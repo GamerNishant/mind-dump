@@ -1,6 +1,8 @@
 import { expect, test } from '@playwright/test'
 
 test('cloud: sign up, dump, clear, restore, sync, delete, sign out/in', async ({ page, context }) => {
+  // Skip the before-noon landing on /today; this test starts on the board.
+  await context.addInitScript(() => sessionStorage.setItem('minddump:landed', '1'))
   const email = `smoke-test-${Date.now()}@example.com`
   const password = 'smoke-test-password-1'
   const text = `Cloud smoke ${Date.now()}`
@@ -23,6 +25,18 @@ test('cloud: sign up, dump, clear, restore, sync, delete, sign out/in', async ({
   await second.goto('./')
   await expect(second.getByRole('button', { name: `Mark done: ${text}`, exact: true })).toBeVisible({ timeout: 15_000 })
   await second.close()
+
+  // Planner (planner_docs table): add the tile to Today, see it there after a reload.
+  await page.getByRole('button', { name: `Add to Today: ${text}` }).click()
+  await expect(page.getByText('Added to Today')).toBeVisible()
+  await page.goto('today')
+  await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible({ timeout: 20_000 })
+  await expect(page.getByText('one-time setup', { exact: false })).toHaveCount(0)
+  await expect(page.getByRole('list', { name: "Today's queue" }).getByText(text)).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('list', { name: "Today's queue" }).getByText(text)).toBeVisible({ timeout: 20_000 })
+  await page.goto('./')
+  await expect(tile).toBeVisible()
 
   await tile.click()
   await expect(tile).toHaveCount(0)

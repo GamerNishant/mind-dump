@@ -4,6 +4,7 @@ import { Toaster } from 'sonner'
 import { AuthProvider, useAuth, useUser } from '@/auth/AuthProvider'
 import { AppHeader } from '@/components/AppHeader'
 import { LocalModeBanner } from '@/components/LocalModeBanner'
+import { FocusAlarm } from '@/components/today/FocusAlarm'
 import { Splash } from '@/components/ui'
 import { AuthPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/AuthPages'
 import { BoardPage } from '@/pages/BoardPage'
@@ -52,6 +53,7 @@ function AppLayout() {
     <DumpsProvider key={user.id} userId={user.id}>
       <PlannerProvider userId={user.id}>
         <MorningLanding />
+        <FocusAlarm />
         <div className="flex min-h-dvh flex-col">
           <AppHeader />
           <LocalModeBanner />

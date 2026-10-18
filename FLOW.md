@@ -380,6 +380,11 @@ Code:
 ### 7.2 Day rollover (RolloverRunner)
 
 The runner starts once both stores are `ready`, and runs again whenever the planner docs, the board dumps or the clock (`useNow`) change.
+
+**Freshness gate.** The rollover writes whole documents built from local state. A device that just woke up must not write its old view over newer changes made on another device, so the runner:
+- does nothing while `refreshing` is true. Waking a tab triggers the backend's watch, which marks a refetch as pending straight away;
+- on the first run on a new planner day, calls `store.refresh()` and waits for `loadSeq` to increase;
+- keys each write by `loadSeq`, so a failed write is retried once after the next successful load, not in a loop.
 1. It works out `today = planDay(now, settings.dayStartHour)`, with the 3 AM boundary.
 2. `planRollover({ docs, today, activeDumps })` returns three lists:
    - **`updates`:**
@@ -391,7 +396,7 @@ The runner starts once both stores are `ready`, and runs again whenever the plan
 3. The runner applies the writes:
    - `updates` go through `store.put`.
    - `creates` go through `store.create`, which runs a server `upsert … ignoreDuplicates` and then a refresh.
-   - Each write is attempted at most once per session.
+   - Each write is attempted at most once per load (`loadSeq`).
 
 ### 7.3 "+ Today" from a tile
 
@@ -462,7 +467,7 @@ The actions on this screen:
 
 ### 7.8 Shutdown
 
-[ShutdownPage](src/pages/ShutdownPage.tsx) runs a 10:00 countdown. At 0 it collapses to Block 1 only. The sections, in order:
+[ShutdownPage](src/pages/ShutdownPage.tsx) first calls `planner.prepareRoutines(tomorrow)`. This creates tomorrow's routine items now, with their deterministic ids, so they count toward tomorrow's caps and a routine block can be Block 1. It also runs a 10:00 countdown. At 0 it collapses to Block 1 only. The sections, in order:
 1. **Resolve open items:** Done, or Skip with a reason (to tomorrow or to the dump).
 2. **Tomorrow's queue:** `planner.addFromDump(dump, tomorrow)`. Routine tiles are listed as "adds itself".
 3. **Block 1:** its first action and minimum, saved with `updateItem`.
@@ -479,4 +484,6 @@ The actions on this screen:
 
 - **Failed write:** it rolls back, shows a toast (`mutate()`) and queues a refresh. A missing table sets `status` to `setup` instead of showing a toast.
 - **Deleted tiles:** items keep their own `title`, so the queue still renders. "+ Today" is only offered on board tiles.
-- **Rollover writes:** each is tried once per session per document, so a failing write can't loop.
+- **Rollover writes:** each is tried once per load generation, so a failing write can't loop.
+- **Deleted or split tiles:** `BoardPage` and `EditDumpDialog` call `planner.retireDump(dumpId)`, which closes that tile's open items with the reason `deleted`.
+- **Time up while away from `/focus`:** `FocusAlarm` (always mounted in `AppLayout`) plays the chime, flashes the tab title, and shows a "Log it" toast that opens `/focus`.

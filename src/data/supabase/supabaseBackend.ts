@@ -268,15 +268,23 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     return {
       async list({ kinds, sinceDay }) {
         if (kinds.length === 0) return []
-        const { data, error } = await table()
-          .select(PLANNER_COLUMNS)
-          .eq('user_id', userId)
-          .in('kind', [...kinds])
-          .or(`day.is.null,day.gte.${sinceDay}`)
-          .order('created_at', { ascending: true })
-          .limit(10_000)
-        if (error) throw plannerError(error)
-        return (data as PlannerRow[]).map(toPlannerDoc)
+        // PostgREST caps each response at the project's "Max rows" (1000 by default), so page.
+        const PAGE = 1000
+        const rows: PlannerRow[] = []
+        for (let from = 0; ; from += PAGE) {
+          const { data, error } = await table()
+            .select(PLANNER_COLUMNS)
+            .eq('user_id', userId)
+            .in('kind', [...kinds])
+            .or(`day.is.null,day.gte.${sinceDay}`)
+            .order('created_at', { ascending: true })
+            .order('id', { ascending: true })
+            .range(from, from + PAGE - 1)
+          if (error) throw plannerError(error)
+          rows.push(...(data as PlannerRow[]))
+          if (data.length < PAGE) break
+        }
+        return rows.map(toPlannerDoc)
       },
 
       async upsert(docs) {
@@ -309,6 +317,11 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
         }
         window.addEventListener('focus', onVisible)
         document.addEventListener('visibilitychange', onVisible)
+        // DELETE events can't be filtered by user (they'd leak other users' row ids), so deletes
+        // from another device arrive through this periodic refetch while the app is visible.
+        const poll = window.setInterval(() => {
+          if (document.visibilityState === 'visible') onChange()
+        }, 60_000)
         const filter = `user_id=eq.${userId}`
         const channel = sb
           .channel(`planner:${userId}`)
@@ -316,6 +329,7 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'planner_docs', filter }, () => onChange())
           .subscribe()
         return () => {
+          window.clearInterval(poll)
           window.removeEventListener('focus', onVisible)
           document.removeEventListener('visibilitychange', onVisible)
           void sb.removeChannel(channel)

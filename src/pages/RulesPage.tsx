@@ -211,6 +211,7 @@ function RuleCard({
   )
 }
 
+/** 24px tall to look right; on touch screens an invisible ::before widens the hit area to 40×56px. */
 function Switch({ checked, onChange, label }: { checked: boolean; onChange: () => void; label: string }) {
   return (
     <button
@@ -221,6 +222,7 @@ function Switch({ checked, onChange, label }: { checked: boolean; onChange: () =
       onClick={onChange}
       className={cn(
         'relative mt-0.5 inline-flex h-6 w-10 shrink-0 items-center rounded-full border transition-colors motion-reduce:transition-none',
+        'pointer-coarse:before:absolute pointer-coarse:before:-inset-2 pointer-coarse:before:rounded-full',
         focusRing,
         checked ? 'border-transparent bg-accent-solid' : 'border-line-strong bg-sunken',
       )}

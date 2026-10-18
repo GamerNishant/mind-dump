@@ -22,8 +22,12 @@ export type ItemType = 'block' | 'task'
 export type ItemStatus = 'open' | 'done' | 'skipped'
 
 export const SKIP_REASONS = ['tired', 'too_big', 'interrupted', 'didnt_want', 'phone', 'forgot'] as const
-/** `unresolved`: a routine left open when its day ended; `restart`: closed by Restart. */
-export type SkipReason = (typeof SKIP_REASONS)[number] | 'unresolved' | 'restart'
+/**
+ * Reasons the user picks are SKIP_REASONS. System reasons: `unresolved` (a routine left open
+ * when its day ended, or a duplicate merged at rollover), `restart` (closed by Restart),
+ * `not_today` (taken off a queue without a skip reason), `deleted` (its tile was deleted or split).
+ */
+export type SkipReason = (typeof SKIP_REASONS)[number] | 'unresolved' | 'restart' | 'not_today' | 'deleted'
 
 export const SKIP_REASON_LABEL: Record<SkipReason, string> = {
   tired: 'Tired',
@@ -34,6 +38,8 @@ export const SKIP_REASON_LABEL: Record<SkipReason, string> = {
   forgot: 'Forgot',
   unresolved: 'Not resolved',
   restart: 'Restart',
+  not_today: 'Not today',
+  deleted: 'Tile removed',
 }
 
 /** Where a skipped item goes: end of today's queue, tomorrow, or off Today (it stays in the dump). */

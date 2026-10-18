@@ -123,6 +123,12 @@ function ShutdownScreen({ view }: { view: TodayView }) {
   const { active } = useDumpsState()
   const navigate = useNavigate()
 
+  // Tomorrow's routines become real items now: they count toward its caps, show in its queue
+  // and can be Block 1. Idempotent (deterministic ids), so re-runs are harmless.
+  useEffect(() => {
+    void planner.prepareRoutines(view.tomorrow)
+  }, [planner, view.tomorrow])
+
   const totalMs = SHUTDOWN_MINUTES * 60_000
   const left = useCountdown(totalMs)
   const timeUp = left === 0
@@ -137,7 +143,9 @@ function ShutdownScreen({ view }: { view: TodayView }) {
   const tomorrowUsage = capUsage(view.tomorrowItems)
   const inTomorrow = new Set(tomorrowItems.map((i) => i.data.dumpId).filter((id): id is string => !!id))
   const tomorrowWeekday = weekdayOf(view.tomorrow)
-  const routines = active.filter((d) => !inTomorrow.has(d.id) && view.metas.get(d.id)?.repeat?.includes(tomorrowWeekday))
+  // Any item (even a skipped one) means the routine was already created for tomorrow.
+  const anyTomorrow = new Set(view.tomorrowItems.map((i) => i.data.dumpId).filter((id): id is string => !!id))
+  const routines = active.filter((d) => !anyTomorrow.has(d.id) && view.metas.get(d.id)?.repeat?.includes(tomorrowWeekday))
   const block1 = tomorrowItems.find((i) => i.data.type === 'block') ?? null
 
   // ---- Block 1 draft (reset whenever tomorrow's Block 1 changes) ----
@@ -411,16 +419,34 @@ function TypeBadge({ type }: { type: TodayItem['type'] }) {
 function ResolveRow({ item }: { item: Doc<TodayItem> }) {
   const planner = usePlanner()
   const [skipping, setSkipping] = useState(false)
+  const [asking, setAsking] = useState(false)
+  const [notMet, setNotMet] = useState(false)
   const [reason, setReason] = useState<SkipReason | null>(null)
   const [busy, setBusy] = useState(false)
   const reasonGroup = useId()
+  const minGroup = useId()
   const title = preview(item.data.title, 80)
 
+  const isBlock = item.data.type === 'block'
+
   const markDone = async () => {
+    setAsking(false)
     setBusy(true)
     const ok = await planner.complete(item.id, true)
     setBusy(false)
     if (ok) toast.success('Done', { description: title, action: { label: 'Undo', onClick: () => void planner.reopen(item.id) } })
+  }
+
+  // A Block is Done only when its minimum is in (the Floor counts it). Not met → skip it with a reason.
+  const onDone = () => {
+    if (!isBlock) return void markDone()
+    setSkipping(false)
+    setAsking((v) => !v)
+  }
+  const answerNo = () => {
+    setAsking(false)
+    setNotMet(true)
+    setSkipping(true)
   }
 
   const skip = async (to: 'tomorrow' | 'dump') => {
@@ -448,34 +474,59 @@ function ResolveRow({ item }: { item: Doc<TodayItem> }) {
           <p className="mt-1 text-sm font-medium break-words text-ink">{item.data.title}</p>
         </div>
         <div className="flex shrink-0 gap-1.5">
-          <Button size="sm" variant="secondary" onClick={() => void markDone()} disabled={busy}>
+          <Button size="sm" variant="secondary" className="pointer-coarse:h-10" onClick={onDone} aria-expanded={isBlock ? asking : undefined} disabled={busy}>
             <Check aria-hidden />
             Done
           </Button>
-          <Button size="sm" variant={skipping ? 'secondary' : 'ghost'} aria-expanded={skipping} onClick={() => setSkipping((v) => !v)} disabled={busy}>
+          <Button
+            size="sm"
+            variant={skipping ? 'secondary' : 'ghost'}
+            className="pointer-coarse:h-10"
+            aria-expanded={skipping}
+            onClick={() => {
+              setAsking(false)
+              setNotMet(false)
+              setSkipping((v) => !v)
+            }}
+            disabled={busy}
+          >
             <SkipForward aria-hidden />
             Skip
           </Button>
         </div>
       </div>
+      {asking && (
+        <div role="group" aria-labelledby={minGroup} className="animate-fade-up mt-3 flex flex-wrap items-center gap-2 rounded-xl bg-sunken px-3 py-2">
+          <span id={minGroup} className="text-sm font-medium text-ink">
+            Minimum met?
+          </span>
+          <Button size="sm" className="pointer-coarse:h-10" onClick={() => void markDone()} disabled={busy}>
+            Yes
+          </Button>
+          <Button size="sm" variant="secondary" className="pointer-coarse:h-10" onClick={answerNo} disabled={busy}>
+            No
+          </Button>
+        </div>
+      )}
       {skipping && (
         <div className="animate-fade-up mt-3 border-t border-line pt-3">
+          {notMet && <p className="mb-2 text-sm text-ink-muted">Not met? Skip it with a reason, or move it to tomorrow.</p>}
           <p id={reasonGroup} className="mb-2 text-xs font-medium text-ink-subtle">
             Why?
           </p>
           <div role="group" aria-labelledby={reasonGroup} className="flex flex-wrap gap-1.5">
             {SKIP_REASONS.map((r) => (
-              <button key={r} type="button" aria-pressed={reason === r} onClick={() => setReason(r)} className={chipClass(reason === r)}>
+              <button key={r} type="button" aria-pressed={reason === r} onClick={() => setReason(r)} className={cn(chipClass(reason === r), 'pointer-coarse:h-10')}>
                 {SKIP_REASON_LABEL[r]}
               </button>
             ))}
           </div>
           {item.data.carryCount >= CARRY_WARN && reason === 'too_big' && <p className="mt-2 text-xs text-ink-muted">Too big? Split it into a smaller tile on the board.</p>}
           <div className="mt-3 flex flex-wrap gap-1.5">
-            <Button size="sm" variant="secondary" disabled={!reason || busy} onClick={() => void skip('tomorrow')}>
+            <Button size="sm" variant="secondary" className="pointer-coarse:h-10" disabled={!reason || busy} onClick={() => void skip('tomorrow')}>
               To tomorrow
             </Button>
-            <Button size="sm" variant="secondary" disabled={!reason || busy} onClick={() => void skip('dump')}>
+            <Button size="sm" variant="secondary" className="pointer-coarse:h-10" disabled={!reason || busy} onClick={() => void skip('dump')}>
               Back to dump
             </Button>
             {!reason && <span className="self-center text-xs text-ink-subtle">Pick a reason first</span>}
@@ -505,10 +556,9 @@ function TomorrowQueue({ view, items, routines }: { view: TodayView; items: Arra
 
   // Fresh adds can be removed outright; items that were skipped or carried keep their history.
   const remove = async (item: Doc<TodayItem>) => {
-    const last = item.data.skips.at(-1)
-    if (!last && item.data.carryCount === 0) {
+    if (!item.data.skips.length && item.data.carryCount === 0) {
       if (await planner.removeItem(item.id)) toast.success('Removed from tomorrow', { description: preview(item.data.title) })
-    } else if (await planner.skip(item.id, last?.reason ?? 'didnt_want', 'dump')) {
+    } else if (await planner.skip(item.id, 'not_today', 'dump')) {
       toast.success('Back to the dump', { description: 'The tile stays on your board.', action: { label: 'Undo', onClick: () => void planner.reopen(item.id) } })
     }
   }
@@ -534,7 +584,7 @@ function TomorrowQueue({ view, items, routines }: { view: TodayView; items: Arra
           <button
             type="button"
             onClick={() => void toggleType(item)}
-            className={cn('shrink-0 rounded-full', focusRing)}
+            className={cn('inline-flex shrink-0 items-center rounded-full pointer-coarse:min-h-10 pointer-coarse:px-2', focusRing)}
             aria-label={`${item.data.type === 'block' ? 'Block' : 'Task'}: change to ${item.data.type === 'block' ? 'Task' : 'Block'}`}
             title="Switch Block / Task"
           >
@@ -543,7 +593,7 @@ function TomorrowQueue({ view, items, routines }: { view: TodayView; items: Arra
           <button
             type="button"
             onClick={() => void remove(item)}
-            className={cn('grid size-8 shrink-0 place-items-center rounded-lg text-ink-subtle hover:bg-sunken hover:text-ink', focusRing)}
+            className={cn('grid size-8 shrink-0 place-items-center rounded-lg text-ink-subtle hover:bg-sunken hover:text-ink pointer-coarse:size-10', focusRing)}
             aria-label={`Remove "${preview(item.data.title, 40)}" from tomorrow`}
           >
             <X className="size-4" aria-hidden />

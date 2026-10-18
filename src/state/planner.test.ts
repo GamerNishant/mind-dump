@@ -15,7 +15,7 @@ async function setup() {
   await dumps.loadActive()
   const store = new PlannerStore(backend.planner(user.id), ALL_KINDS, () => '2000-01-01')
   await store.load()
-  const planner = new Planner(store, dumps)
+  const planner = new Planner(store, dumps, user.id)
   return { dumps, store, planner, day: planner.today() }
 }
 

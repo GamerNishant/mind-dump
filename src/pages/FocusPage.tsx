@@ -94,7 +94,8 @@ function FocusView({ session }: { session: Doc<FocusSession> }) {
   const [busy, setBusy] = useState(false)
 
   // ---- document.title: remaining time while running, a flag when time is up -----------------
-  const originalTitle = useRef(document.title)
+  // FocusAlarm may be flashing the time-up title when this page opens: never restore to that.
+  const originalTitle = useRef(document.title === TIME_UP_TITLE ? 'Mind Dump' : document.title)
   useEffect(() => {
     const original = originalTitle.current
     return () => {
@@ -239,7 +240,9 @@ function FocusView({ session }: { session: Doc<FocusSession> }) {
           if (!ok) return
           setEndOpen(false)
           toast(stoppedAt.trim() ? 'Block logged. Bookmark saved.' : 'Block logged.')
-          navigate('/today')
+          // Replace: the ended session also triggers FocusPage's <Navigate replace>; pushing here
+          // would leave a duplicate /today entry in history.
+          void navigate('/today', { replace: true })
         }}
       />
     </main>

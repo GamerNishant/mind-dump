@@ -30,9 +30,12 @@ export function RestartCard({ view }: { view: TodayView }) {
 
   const bringBack = async () => {
     setBusy('bring')
-    const ok = await planner.bringBack(view.today, ids)
+    const { brought, left } = await planner.bringBack(view.today, ids)
     setBusy(null)
-    if (ok) toast.success(`${n} ${noun} brought into today`)
+    // Items that didn't fit stay stale, so this card stays up for them.
+    if (left > 0) toast.success(`Brought ${brought} into today. ${left} didn't fit the caps — they're still here.`)
+    else if (brought > 0) toast.success(`Brought ${brought} into today.`)
+    else toast.success('Already in today.')
   }
 
   return (
@@ -70,11 +73,16 @@ export function RestartCard({ view }: { view: TodayView }) {
       </details>
 
       <div className="mt-4 flex flex-wrap gap-2">
-        <Button onClick={() => void restart()} loading={busy === 'restart'} disabled={busy !== null}>
+        <Button className="pointer-coarse:h-10" onClick={() => void restart()} loading={busy === 'restart'} disabled={busy !== null}>
           <RotateCcw aria-hidden />
           Restart
         </Button>
-        <Button variant="secondary" onClick={() => void bringBack()} loading={busy === 'bring'} disabled={busy !== null}>
+        <Button
+          variant="secondary"
+          className="pointer-coarse:h-10"
+          onClick={() => void bringBack()} loading={busy === 'bring'}
+          disabled={busy !== null}
+        >
           {n === 1 ? 'Bring it into today' : 'Bring them into today'}
         </Button>
       </div>

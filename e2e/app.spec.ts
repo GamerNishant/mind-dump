@@ -1,6 +1,18 @@
 import { expect, test, type Page } from '@playwright/test'
 
 const PASSWORD = 'correct-horse-1'
+
+// Before noon the app sends the first visit of a session to /today (MorningLanding).
+// These tests are about the board, so mark the session as already landed.
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    try {
+      sessionStorage.setItem('minddump:landed', '1')
+    } catch {
+      // Storage unavailable: nothing to do.
+    }
+  })
+})
 let counter = 0
 
 async function signUp(page: Page, name = 'Test User'): Promise<string> {

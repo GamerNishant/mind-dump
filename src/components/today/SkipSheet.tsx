@@ -62,7 +62,7 @@ export function ChoiceChips<T extends string>({ label, options, value, onChange,
               onClick={() => onChange(o.value)}
               onKeyDown={(e) => onKeyDown(e, i)}
               className={cn(
-                'h-9 rounded-full border px-3.5 text-sm font-medium transition-colors',
+                'h-9 pointer-coarse:h-10 rounded-full border px-3.5 text-sm font-medium transition-colors',
                 focusRing,
                 checked
                   ? 'border-accent bg-accent-soft text-accent'

@@ -82,6 +82,10 @@ language plpgsql
 set search_path = ''
 as $$
 begin
+  -- Upserts fire BEFORE INSERT too; an update of an existing row adds nothing, so let it through.
+  if exists (select 1 from public.planner_docs where id = new.id) then
+    return new;
+  end if;
   if (select count(*) from public.planner_docs where user_id = new.user_id) >= 50000 then
     raise exception 'Planner limit reached (50000 entries).' using errcode = 'P0001';
   end if;

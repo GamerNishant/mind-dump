@@ -73,7 +73,7 @@ export function TodayPage() {
             <EmptyState
               icon={<Sunrise />}
               title="Nothing queued."
-              description="Add from your dump (tap ☀+ on a tile) or type below."
+              description="Add from your dump (the calendar + button on a tile) or type below."
               action={
                 <Link to="/" className={buttonClass('secondary')}>
                   Open the board
