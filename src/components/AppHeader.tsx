@@ -1,11 +1,12 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router'
-import { Cloud, HardDrive, History, LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Cloud, HardDrive, History, LayoutGrid, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth, useUser } from '@/auth/AuthProvider'
 import { errorMessage } from '@/data/errors'
 import { initialsOf } from '@/domain/user'
 import { cn } from '@/lib/cn'
+import { useToday } from '@/state/PlannerProvider'
 import { useTheme, type ThemePreference } from '@/theme/ThemeProvider'
 import { buttonClass, focusRing, Logo } from './ui'
 
@@ -16,13 +17,13 @@ export function AppHeader() {
         <Link to="/" className={cn('-ml-1 rounded-lg px-1 py-0.5', focusRing)} aria-label="Mind Dump — board">
           <Logo />
         </Link>
-        <nav className="ml-auto flex items-center gap-1.5" aria-label="Main">
-          <NavLink
-            to="/history"
-            className={({ isActive }) =>
-              buttonClass(isActive ? 'secondary' : 'ghost', 'sm', cn('h-9', isActive && 'text-accent'))
-            }
-          >
+        <nav className="ml-auto flex min-w-0 items-center gap-1 sm:gap-1.5" aria-label="Main">
+          <NavLink to="/" end className={navClass}>
+            <LayoutGrid aria-hidden />
+            <span className="max-sm:sr-only">Dump</span>
+          </NavLink>
+          <TodayLink />
+          <NavLink to="/history" className={navClass}>
             <History aria-hidden />
             <span className="max-sm:sr-only">History</span>
           </NavLink>
@@ -30,6 +31,37 @@ export function AppHeader() {
         </nav>
       </div>
     </header>
+  )
+}
+
+const navClass = ({ isActive }: { isActive: boolean }) =>
+  buttonClass(isActive ? 'secondary' : 'ghost', 'sm', cn('relative h-9 max-sm:px-2.5', isActive && 'text-accent'))
+
+/** "Today" with a count of open items and a pulsing dot while a focus block runs. */
+function TodayLink() {
+  const { items, focus } = useToday()
+  const open = items.filter((i) => i.data.status === 'open').length
+  const running = !!focus
+  const title = [open > 0 && `${open} open in Today`, running && 'Focus block running'].filter(Boolean).join(' · ')
+  return (
+    <NavLink to="/today" className={navClass} title={title || undefined}>
+      <Sun aria-hidden />
+      <span className="max-sm:sr-only">Today</span>
+      {open > 0 && (
+        <span
+          aria-hidden
+          className="grid h-4 min-w-4 place-items-center rounded-full bg-accent-solid px-1 text-[10px] leading-none font-semibold text-accent-ink tabular-nums max-sm:absolute max-sm:-top-0.5 max-sm:-right-0.5"
+        >
+          {open > 9 ? '9+' : open}
+        </span>
+      )}
+      {running && (
+        <span aria-hidden className="absolute top-1 left-1 flex size-2">
+          <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-400 opacity-75 motion-reduce:animate-none" />
+          <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
+        </span>
+      )}
+    </NavLink>
   )
 }
 

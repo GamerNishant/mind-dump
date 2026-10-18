@@ -6,6 +6,14 @@ export class AppError extends Error {
   }
 }
 
+/** The cloud database is missing the planner table: the planner migration hasn't been run yet. */
+export class SetupRequiredError extends AppError {
+  constructor(options?: { cause?: unknown }) {
+    super('The planner needs a one-time database update.', options)
+    this.name = 'SetupRequiredError'
+  }
+}
+
 export function errorMessage(error: unknown, fallback = 'Something went wrong. Please try again.'): string {
   if (error instanceof AppError) return error.message
   if (error instanceof TypeError && /fetch|network/i.test(error.message)) {

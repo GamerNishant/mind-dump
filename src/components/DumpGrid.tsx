@@ -17,6 +17,7 @@ import {
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Dump } from '@/domain/dump'
+import type { RepeatDays, TileMeta } from '@/domain/plan'
 import { preview } from '@/lib/text'
 import { DumpCard } from './DumpCard'
 
@@ -29,24 +30,74 @@ interface DumpGridProps {
   onEdit: (dump: Dump) => void
   /** `orderedIds` is the full visible order after the move. */
   onReorder: (movedId: string, orderedIds: string[]) => void
+  /** Dump ids that are already in Today (shows the "In Today" chip). */
+  inTodayIds?: ReadonlySet<string>
+  /** Planner info per dump id (repeat days, Bookmark). */
+  metas?: ReadonlyMap<string, TileMeta>
+  /** Shows the "+ Today" button on every tile when given. */
+  onAddToday?: (dump: Dump) => void
+}
+
+const DAY_SHORT = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
+const DAY_LONG = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
+/** Monday-first display order (values are Date#getDay numbers). */
+const WEEK_ORDER = [1, 2, 3, 4, 5, 6, 0]
+
+/** Short chip label + full description for a repeat setting, or null when it doesn't repeat. */
+function describeRepeat(repeat: RepeatDays | null | undefined): { label: string; title: string } | null {
+  if (!repeat?.length) return null
+  const days = WEEK_ORDER.filter((d) => repeat.includes(d))
+  if (days.length === 0) return null
+  const key = days.join(',')
+  const title = `Repeats ${days.map((d) => DAY_LONG[d]).join(', ')}`
+  if (days.length === 7) return { label: 'Daily', title: 'Repeats every day' }
+  if (key === '1,2,3,4,5') return { label: 'Weekdays', title: 'Repeats on weekdays' }
+  if (key === '6,0') return { label: 'Weekends', title: 'Repeats on weekends' }
+  if (days.length <= 3) return { label: days.map((d) => DAY_SHORT[d]).join(' '), title }
+  return { label: `${days.length} days`, title }
 }
 
 /** Ignore the click that some browsers fire right after a drop. */
 const CLICK_AFTER_DRAG_MS = 250
 
-export function DumpGrid({ dumps, now, dragDisabled, exitingIds, onComplete, onEdit, onReorder }: DumpGridProps) {
+export function DumpGrid({
+  dumps,
+  now,
+  dragDisabled,
+  exitingIds,
+  onComplete,
+  onEdit,
+  onReorder,
+  inTodayIds,
+  metas,
+  onAddToday,
+}: DumpGridProps) {
   const [activeId, setActiveId] = useState<string | null>(null)
   const lastDragEnd = useRef(0)
   // Latest callbacks behind stable wrappers, so memoized tiles don't re-render on every parent render.
-  const callbacks = useRef({ onComplete, onEdit })
+  const callbacks = useRef({ onComplete, onEdit, onAddToday })
   useLayoutEffect(() => {
-    callbacks.current = { onComplete, onEdit }
+    callbacks.current = { onComplete, onEdit, onAddToday }
   })
   const handleComplete = useCallback((dump: Dump) => {
     if (performance.now() - lastDragEnd.current < CLICK_AFTER_DRAG_MS) return
     callbacks.current.onComplete(dump)
   }, [])
   const handleEdit = useCallback((dump: Dump) => callbacks.current.onEdit(dump), [])
+  const handleAddToday = useCallback((dump: Dump) => callbacks.current.onAddToday?.(dump), [])
+  const canAddToday = !!onAddToday
+
+  /** Primitive per-tile planner props, so memoized tiles only re-render when their own info changes. */
+  const infoOf = (id: string) => {
+    const meta = metas?.get(id)
+    const repeat = describeRepeat(meta?.repeat)
+    return {
+      inToday: inTodayIds?.has(id) ?? false,
+      repeatLabel: repeat?.label,
+      repeatTitle: repeat?.title,
+      bookmark: meta?.resumeNote?.trim() || undefined,
+    }
+  }
 
   const sensors = useSensors(
     useSensor(MouseSensor, { activationConstraint: { distance: 6 } }),
@@ -110,13 +161,15 @@ export function DumpGrid({ dumps, now, dragDisabled, exitingIds, onComplete, onE
               exiting={exitingIds.has(dump.id)}
               onComplete={handleComplete}
               onEdit={handleEdit}
+              onAddToday={canAddToday ? handleAddToday : undefined}
+              {...infoOf(dump.id)}
             />
           ))}
         </ul>
       </SortableContext>
       {createPortal(
         <DragOverlay dropAnimation={{ duration: 220, easing: 'cubic-bezier(0.2, 0.8, 0.2, 1)' }}>
-          {activeDump ? <DumpCard dump={activeDump} now={now} overlay /> : null}
+          {activeDump ? <DumpCard dump={activeDump} now={now} overlay {...infoOf(activeDump.id)} /> : null}
         </DragOverlay>,
         document.body,
       )}
@@ -131,9 +184,26 @@ interface SortableTileProps {
   exiting: boolean
   onComplete: (dump: Dump) => void
   onEdit: (dump: Dump) => void
+  onAddToday?: (dump: Dump) => void
+  inToday: boolean
+  repeatLabel?: string
+  repeatTitle?: string
+  bookmark?: string
 }
 
-const SortableTile = memo(function SortableTile({ dump, now, disabled, exiting, onComplete, onEdit }: SortableTileProps) {
+const SortableTile = memo(function SortableTile({
+  dump,
+  now,
+  disabled,
+  exiting,
+  onComplete,
+  onEdit,
+  onAddToday,
+  inToday,
+  repeatLabel,
+  repeatTitle,
+  bookmark,
+}: SortableTileProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: dump.id,
     disabled,
@@ -171,6 +241,11 @@ const SortableTile = memo(function SortableTile({ dump, now, disabled, exiting, 
         }
         onComplete={() => onComplete(dump)}
         onEdit={() => onEdit(dump)}
+        onAddToday={onAddToday ? () => onAddToday(dump) : undefined}
+        inToday={inToday}
+        repeatLabel={repeatLabel}
+        repeatTitle={repeatTitle}
+        bookmark={bookmark}
       />
     </li>
   )

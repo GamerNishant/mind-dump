@@ -4,7 +4,7 @@
 
 ## 1. What it is
 
-Mind Dump is a single-page web app for emptying your head. Each thought you type becomes a **tile** on a board, and every tile shows how many days it has been waiting. Clicking a tile means "handled": it moves to **History**, where you can restore it or delete it for good. It is built for individuals who want a low-friction, private place to capture loose thoughts and to-dos on phone and desktop.
+Mind Dump is a single-page web app for emptying your head and then doing the right things today. Each thought you type becomes a **tile** on a board, and every tile shows how many days it has been waiting. Clicking a tile means "handled": it moves to **History**, where you can restore it or delete it for good. It is built for individuals who want a low-friction, private place to capture loose thoughts and to-dos on phone and desktop.
 
 ### Main features
 
@@ -22,6 +22,7 @@ Mind Dump is a single-page web app for emptying your head. Each thought you type
 | Light, dark and auto themes, with no flash of the wrong theme on load | [index.html](index.html), [src/theme/ThemeProvider.tsx](src/theme/ThemeProvider.tsx) |
 | Keyboard shortcuts: `n` or `/` focuses the composer | [src/pages/BoardPage.tsx](src/pages/BoardPage.tsx) |
 | Installable web app manifest | [public/manifest.webmanifest](public/manifest.webmanifest) |
+| **Planner**: Today queue, "+ Today" on tiles, routines, focus blocks, Skip sheet, Morning Check, Shutdown, hour log, rules (see §8) | [src/pages/TodayPage.tsx](src/pages/TodayPage.tsx), [src/components/today/](src/components/today/), [src/state/planner.ts](src/state/planner.ts) |
 
 ## 2. Tech stack
 
@@ -220,3 +221,93 @@ Scripts from [package.json](package.json):
 - **GitHub Pages**: [.github/workflows/deploy-pages.yml](.github/workflows/deploy-pages.yml) runs on push to `main` or by manual dispatch. Steps: `npm ci` → `npm test` → `npm run build` with `VITE_BASE=/<repo>/` (or `/` for a `*.github.io` repo) → `cp dist/index.html dist/404.html` (so deep links work, since Pages has no SPA rewrites) → upload and deploy.
 - **Vercel / Netlify / Cloudflare Pages**: build `npm run build`, output `dist`. SPA rewrites come from [vercel.json](vercel.json) and [public/_redirects](public/_redirects).
 - **Supabase setup** (one time): run the migration SQL, then set Site URL and Redirect URLs. The README covers email confirmation and SMTP.
+
+## 8. Planner (Today, focus, shutdown)
+
+### 8.1 What it is for
+
+The planner implements a daily execution system written for the owner, an early riser preparing for an exam. Its four rules:
+
+- **Sequence, not clock.** Today is an ordered queue, never a timetable.
+- **Nothing leaves Today silently.** Every item ends Done, or Skipped with a reason.
+- **The dump stays the source.** Today items point at tiles, and tiles stay on the board.
+- **The Floor.** A minimum day is one block's minimum plus shutdown, and you never miss twice.
+
+The app is meant to take under 2 minutes in the morning and under 10 at night.
+
+| Screen / piece | What it does | Code |
+|---|---|---|
+| **+ Today** on each tile | Adds the tile to today's queue. The tile stays and gets an "In Today" chip. The caps apply. | [DumpCard.tsx](src/components/DumpCard.tsx), [BoardPage.tsx](src/pages/BoardPage.tsx) |
+| **Today** (`/today`) | The day's screen. Top: header (blocks done / cap, 7 Floor dots, "never miss twice"), Restart card, Morning Check card, **Next** card. Middle: the draggable **Queue**. Each item shows Block/Task, minutes, first action, minimum and carried ×N, with Done, Start and Skip. Bottom: add form (adding also creates a tile), "Pick from dump", hour log strip. | [TodayPage.tsx](src/pages/TodayPage.tsx), [components/today/](src/components/today/) |
+| **Skip sheet** | Start, Shrink, Say: "Do just 2 minutes", "Shrink to 10 min", or skip with a reason and a destination (later today / tomorrow / back to dump). Shows the matching if-then rules. | [SkipSheet.tsx](src/components/today/SkipSheet.tsx) |
+| **Focus** (`/focus`) | Countdown for the running block. It is wall-clock based, survives reloads and syncs across devices. Controls: pause, +10, end, and "Park a thought" (creates a tile). The end dialog asks "minimum met?" and "where did you stop?". That answer is saved as the tile's **Bookmark** and becomes the next first action. Study hours fill in automatically. | [FocusPage.tsx](src/pages/FocusPage.tsx) |
+| **Shutdown** (`/shutdown`) | A 10-minute screen. Resolve every open item, build tomorrow's queue, set Block 1's first action and minimum, tick the food check, then press "Shutdown complete". This records blocks done and the Floor. | [ShutdownPage.tsx](src/pages/ShutdownPage.tsx) |
+| **Repeat** in the edit dialog | Off / Daily / Weekdays / chosen days, plus type, minutes, habit (doesn't count toward caps), minimum and Bookmark. Also "Split into lines". | [EditDumpDialog.tsx](src/components/EditDumpDialog.tsx) |
+| **Rules** (`/rules`) | If-then plans, seeded with 15 starters and editable. Plan settings: block cap (the Ramp, 1–4), task cap, day start hour. | [RulesPage.tsx](src/pages/RulesPage.tsx) |
+| **Hour log** | "Where did the time go?": tap hours and mark a category (Study, Phone, Sleep, Food, Build, Chores, Leisure, Other). | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx) |
+| Morning landing | Before noon, the first visit to `/` in a browser session opens `/today`. | `MorningLanding` in [App.tsx](src/App.tsx) |
+
+### 8.2 Data model: one generic document table
+
+All planner data lives in **`public.planner_docs`** ([migration](supabase/migrations/20261018000000_planner.sql)):
+
+- **Columns:** `id uuid`, `user_id`, `kind text`, `day text (YYYY-MM-DD) | null`, `data jsonb`, and timestamps.
+- **Rules on the table:**
+  - RLS: users can only reach their own rows.
+  - Timestamps are set by the server, and `kind` can't change after insert.
+  - Each document is capped at 32 KB, with a quota of 50,000 rows per user.
+  - Realtime is enabled.
+- **Device-only mode** stores the same documents in `minddump:local:planner:<userId>`.
+
+Why one table: the owner can't easily run a migration every time a feature changes, so new planner features ship as new `kind`s without SQL. The trade-off is weaker typing in the database. The client types in [src/domain/plan.ts](src/domain/plan.ts) do the validation instead.
+
+| `kind` | `day` | id | `data` ([src/domain/plan.ts](src/domain/plan.ts)) |
+|---|---|---|---|
+| `today_item` | planned day | random; routine instances use `stableId('today_item','routine',dumpId,day)` | `TodayItem`: dumpId, title, type block/task, minutes, firstAction, minimum, order, status open/done/skipped, minMet, skips[], carriedFrom, carryCount, routine, habit, doneAt |
+| `tile_meta` | null | **= the dump's id** | `TileMeta`: repeat weekdays, defaultType/Minutes/Minimum, habit, resumeNote (Bookmark), skipCount, carryCount |
+| `focus_session` | day | random | `FocusSession`: itemId, plannedMin, startedAt, pausedAt/pausedMs, endedAt, minMet, stoppedAt, starter |
+| `hour_log` | day | `stableId('hour_log',day)` | `{ hours: { "4": "study", ... } }` |
+| `day_plan` | day | `stableId('day_plan',day)` | `DayPlan`: morningCheckAt, block1, shutdownAt, blocksDone, floorMet, foodSorted, tomorrowFirst, restartAt |
+| `rule` | null | random | `Rule`: ifText, thenText, reason, active, order |
+| `settings` | null | `stableId('settings')` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded |
+
+### 8.3 Architecture
+
+- **`PlannerApi`** ([types.ts](src/data/types.ts)) has `list({kinds, sinceDay})`, `upsert`, `insertMissing` (inserts only new ids: `on conflict do nothing`), `remove` and `watch`.
+  - Both backends implement it.
+  - A missing table (PostgREST `PGRST205` / `42P01`) becomes a `SetupRequiredError`.
+- **`PlannerStore`** ([plannerStore.ts](src/state/plannerStore.ts)) works the same way as `DumpsStore`:
+  - Changes apply optimistically, go to the backend, and roll back with a toast if the backend fails.
+  - Requests are chained per document, stale reads are discarded, and watch events trigger a debounced refresh.
+  - It holds `docs: Map<id, PlannerDoc>` and `status`, which is `setup` when the table is missing.
+  - It loads every kind, but only dated documents from the last 45 days.
+- **`Planner`** ([planner.ts](src/state/planner.ts)) holds the use-cases: add from dump, add text, reorder, complete, skip, focus start/pause/end, hour log, morning check, shutdown, restart, tile meta, rules and settings. The UI calls only these.
+- **Pure logic** ([lib/plan.ts](src/lib/plan.ts), unit-tested): planner days, `stableId`, caps, the Floor and its dots, `planRollover`, hour-log helpers, focus timing.
+- **`PlannerProvider`** ([PlannerProvider.tsx](src/state/PlannerProvider.tsx)) sits inside `DumpsProvider`.
+  - It creates the store and the `Planner`, and runs the **RolloverRunner**.
+  - It exposes `usePlanner()`, `usePlannerState()` and `useToday()` (the derived view of the current day).
+
+### 8.4 Key decisions
+
+1. **The planner day starts at 3 AM** (`dayStartHour`), so late nights belong to the previous day and a 4 AM start counts as "today".
+2. **Rollover is pure and idempotent** (`planRollover`). It handles four cases:
+   - **Yesterday's open, non-routine items** move to the end of today with `carryCount+1`. At a count of 3 the UI suggests splitting the item.
+   - **Routines left open** close as skipped "Not resolved". They never carry over.
+   - **Recurring tiles due today** each get a routine item. The id is deterministic and the write uses `insertMissing`, so two devices rolling over at 3 AM can't duplicate an item or overwrite progress.
+   - **Items older than yesterday** are **stale**. They wait until the user picks Restart or Bring back.
+
+   The runner attempts each write once per session, so a failing write can't loop.
+3. **Caps** default to 2 blocks (maximum 4) and 5 tasks. Open and done items count toward a cap. Skipped items and habits don't.
+4. **Focus sessions are planner documents.** A block started on the laptop shows on the phone. Elapsed time is computed from timestamps minus pauses.
+5. **The Bookmark** (`tile_meta.resumeNote`) is written at the end of a block or during the morning check. It becomes the next first action whenever the tile is queued.
+6. **Typing an item in Today creates a dump tile too**, so the dump stays the single source.
+7. **Cloud mode needs a one-time setup.** If the table is missing, Today shows a **SetupCard** with the SQL, a copy button and a link to the project's SQL editor.
+
+### 8.5 How to extend the planner
+
+1. Add a new `kind` to `KIND`, and its data type, in [domain/plan.ts](src/domain/plan.ts).
+2. Add pure helpers to [lib/plan.ts](src/lib/plan.ts), with tests.
+3. Add use-case methods to `Planner`.
+4. Read the data through `useToday()` or `usePlannerState()`.
+
+No migration is needed unless you want server-side constraints or queries on `data`.

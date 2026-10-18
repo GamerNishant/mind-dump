@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowUpDown, ChevronDown, RefreshCw, Search, SearchX, Sparkles, X } from 'lucide-react'
+import { useLocation, useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { useUser } from '@/auth/AuthProvider'
 import { Composer } from '@/components/Composer'
@@ -13,6 +14,7 @@ import { cn } from '@/lib/cn'
 import { DEFAULT_SORT, isSortMode, matchesQuery, SORT_OPTIONS, sortDumps, type SortMode } from '@/lib/sort'
 import { preview } from '@/lib/text'
 import { useDumpsState, useDumpsStore } from '@/state/DumpsProvider'
+import { usePlanner, useToday } from '@/state/PlannerProvider'
 
 const EXIT_MS = 220
 
@@ -37,6 +39,12 @@ export function BoardPage() {
   const [editingId, setEditingId] = useState<string | null>(null)
   const editing = editingId ? (active.find((d) => d.id === editingId) ?? null) : null
   const composerRef = useRef<HTMLTextAreaElement>(null)
+  const planner = usePlanner()
+  const { inToday, metas } = useToday()
+  const navigate = useNavigate()
+  const location = useLocation()
+  // Today's "Too big? Split it" links here with the tile to open.
+  const editDumpId = (location.state as { editDumpId?: unknown } | null)?.editDumpId
 
   const searching = query.trim() !== ''
   const sorted = useMemo(() => sortDumps(active, sort), [active, sort])
@@ -50,6 +58,21 @@ export function BoardPage() {
       setEditingId(null)
     }
   }, [active, activeStatus, editingId])
+
+  // Open the requested tile's editor once the board has loaded, then clear the request
+  // so a reload or Back doesn't reopen it.
+  const handledEditId = useRef<string | null>(null)
+  useEffect(() => {
+    if (typeof editDumpId !== 'string') {
+      handledEditId.current = null
+      return
+    }
+    if (handledEditId.current === editDumpId || activeStatus === 'idle' || activeStatus === 'loading') return
+    handledEditId.current = editDumpId
+    if (active.some((d) => d.id === editDumpId)) setEditingId(editDumpId)
+    else toast("That tile isn't on the board any more")
+    void navigate(location.pathname, { replace: true, state: null })
+  }, [editDumpId, active, activeStatus, navigate, location.pathname])
 
   // "n" or "/" jumps to the composer from anywhere on the board.
   useEffect(() => {
@@ -127,9 +150,11 @@ export function BoardPage() {
   )
 
   const remove = useCallback(
-    (dump: Dump) => {
+    (dump: Dump, opts?: { quiet?: boolean }) => {
       const restoreFocus = focusAfterRemoval(dump.id)
-      void store.remove(dump.id).then((ok) => ok && toast('Dump deleted', { description: preview(dump.content) }))
+      void store
+        .remove(dump.id)
+        .then((ok) => ok && !opts?.quiet && toast('Dump deleted', { description: preview(dump.content) }))
       restoreFocus()
     },
     [store, focusAfterRemoval],
@@ -144,6 +169,38 @@ export function BoardPage() {
   )
 
   const openEditor = useCallback((dump: Dump) => setEditingId(dump.id), [])
+
+  const addToday = useCallback(
+    async (dump: Dump) => {
+      const openToday = { label: 'Open Today', onClick: () => void navigate('/today') }
+      const { status } = planner.store.getState()
+      if (status === 'setup') {
+        toast('Today needs a one-time setup', { description: 'Open Today to finish it.', action: openToday })
+        return
+      }
+      if (status !== 'ready') {
+        toast(status === 'error' ? "Today couldn't load" : 'Today is still loading', {
+          description: 'Try again in a moment.',
+          action: openToday,
+        })
+        return
+      }
+      const description = preview(dump.content)
+      const result = await planner.addFromDump(dump)
+      if (result.ok) {
+        toast.success('Added to Today', {
+          description,
+          action: { label: 'Undo', onClick: () => void planner.removeItem(result.id) },
+        })
+      } else if (result.reason === 'exists') {
+        toast('Already in Today', { description, action: openToday })
+      } else if (result.reason === 'full') {
+        toast.error('Today is full: finish, skip or remove one first', { description, action: openToday })
+      }
+      // 'error': the planner store already showed an error toast.
+    },
+    [planner, navigate],
+  )
 
   const loading = activeStatus === 'idle' || activeStatus === 'loading'
 
@@ -267,6 +324,9 @@ export function BoardPage() {
               onComplete={complete}
               onEdit={openEditor}
               onReorder={reorder}
+              inTodayIds={inToday}
+              metas={metas}
+              onAddToday={addToday}
             />
           )}
         </div>

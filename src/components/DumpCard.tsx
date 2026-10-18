@@ -1,6 +1,6 @@
 import type { KeyboardEventHandler, MouseEventHandler, Ref, TouchEventHandler } from 'react'
 import type { DraggableAttributes } from '@dnd-kit/core'
-import { Clock, GripVertical, Pencil } from 'lucide-react'
+import { Bookmark, CalendarCheck, CalendarPlus, Clock, GripVertical, Pencil, Repeat, Sun } from 'lucide-react'
 import type { Dump } from '@/domain/dump'
 import { cn } from '@/lib/cn'
 import { ageTone, daysBetween, formatDate, pendingLabel, type AgeTone } from '@/lib/days'
@@ -60,12 +60,40 @@ interface DumpCardProps {
   handle?: DragHandleProps
   onComplete?: () => void
   onEdit?: () => void
+  /** Tile already has an open/done item in Today: shows the "In Today" chip. */
+  inToday?: boolean
+  /** Short repeat summary ("Daily", "Mon Wed Fri"); shown as a chip when set. */
+  repeatLabel?: string
+  /** Full repeat description for the chip's tooltip / screen readers. */
+  repeatTitle?: string
+  /** The Bookmark (resume note); shown as a chip when non-empty. */
+  bookmark?: string
+  /** "+ Today" button. Omit to hide it (e.g. in the drag overlay). */
+  onAddToday?: () => void
 }
+
+const chip = 'inline-flex min-w-0 items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium'
 
 const stop = (e: { stopPropagation(): void }) => e.stopPropagation()
 
-export function DumpCard({ dump, now, overlay, placeholder, exiting, surface, handle, onComplete, onEdit }: DumpCardProps) {
+export function DumpCard({
+  dump,
+  now,
+  overlay,
+  placeholder,
+  exiting,
+  surface,
+  handle,
+  onComplete,
+  onEdit,
+  inToday = false,
+  repeatLabel,
+  repeatTitle,
+  bookmark,
+  onAddToday,
+}: DumpCardProps) {
   const tone = ageTone(daysBetween(dump.createdAt, now))
+  const note = bookmark?.trim() ?? ''
 
   return (
     <div
@@ -97,8 +125,33 @@ export function DumpCard({ dump, now, overlay, placeholder, exiting, surface, ha
         {dump.content}
       </p>
 
-      <div className="pointer-events-none relative mt-auto flex items-center pt-3 pr-8">
+      <div
+        className={cn(
+          'pointer-events-none relative mt-auto flex min-w-0 flex-wrap items-center gap-1 pt-3',
+          onAddToday ? 'pr-[4.5rem]' : 'pr-8',
+        )}
+      >
         <PendingBadge createdAt={dump.createdAt} now={now} />
+        {inToday && (
+          <span className={cn(chip, 'bg-accent-soft text-accent')}>
+            <Sun className="size-3 shrink-0" aria-hidden />
+            In Today
+          </span>
+        )}
+        {repeatLabel && (
+          <span className={cn(chip, 'bg-sunken text-ink-muted')} title={repeatTitle ?? repeatLabel}>
+            <Repeat className="size-3 shrink-0" aria-hidden />
+            <span className="sr-only">Repeats: </span>
+            <span className="truncate">{repeatLabel}</span>
+          </span>
+        )}
+        {note && (
+          // Hoverable so the note shows as a tooltip; it's tiny, so it barely shrinks the click-to-clear area.
+          <span className={cn(chip, 'pointer-events-auto cursor-help bg-sunken text-ink-muted')} title={`Bookmark: ${note}`}>
+            <Bookmark className="size-3 shrink-0" aria-hidden />
+            <span className="sr-only">Bookmark: {note}</span>
+          </span>
+        )}
       </div>
 
       {handle && (
@@ -116,6 +169,26 @@ export function DumpCard({ dump, now, overlay, placeholder, exiting, surface, ha
           )}
         >
           <GripVertical className="size-4" aria-hidden />
+        </button>
+      )}
+
+      {onAddToday && (
+        <button
+          type="button"
+          onClick={onAddToday}
+          onMouseDown={stop}
+          onTouchStart={stop}
+          aria-label={`Add to Today: ${preview(dump.content, 60)}`}
+          aria-disabled={inToday || undefined}
+          title={inToday ? 'Already in Today' : 'Add to Today'}
+          className={cn(
+            'absolute right-10 bottom-1.5 z-10 grid size-8 place-items-center rounded-lg transition',
+            'opacity-0 group-hover:opacity-100 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent',
+            'pointer-coarse:opacity-70',
+            inToday ? 'cursor-default text-accent' : 'text-ink-subtle hover:bg-accent-soft hover:text-accent',
+          )}
+        >
+          {inToday ? <CalendarCheck className="size-3.5" aria-hidden /> : <CalendarPlus className="size-3.5" aria-hidden />}
         </button>
       )}
 

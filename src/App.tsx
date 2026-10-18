@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react'
-import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation } from 'react-router'
+import { useEffect, type ReactNode } from 'react'
+import { BrowserRouter, Navigate, Outlet, Route, Routes, useLocation, useNavigate } from 'react-router'
 import { Toaster } from 'sonner'
 import { AuthProvider, useAuth, useUser } from '@/auth/AuthProvider'
 import { AppHeader } from '@/components/AppHeader'
@@ -7,8 +7,13 @@ import { LocalModeBanner } from '@/components/LocalModeBanner'
 import { Splash } from '@/components/ui'
 import { AuthPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/AuthPages'
 import { BoardPage } from '@/pages/BoardPage'
+import { FocusPage } from '@/pages/FocusPage'
 import { HistoryPage } from '@/pages/HistoryPage'
+import { RulesPage } from '@/pages/RulesPage'
+import { ShutdownPage } from '@/pages/ShutdownPage'
+import { TodayPage } from '@/pages/TodayPage'
 import { DumpsProvider } from '@/state/DumpsProvider'
+import { PlannerProvider } from '@/state/PlannerProvider'
 import { ThemeProvider, useTheme } from '@/theme/ThemeProvider'
 
 const basename = import.meta.env.BASE_URL.replace(/\/$/, '') || '/'
@@ -45,13 +50,37 @@ function AppLayout() {
   return (
     // Keyed by user so nothing from a previous account survives a sign-in switch.
     <DumpsProvider key={user.id} userId={user.id}>
-      <div className="flex min-h-dvh flex-col">
-        <AppHeader />
-        <LocalModeBanner />
-        <Outlet />
-      </div>
+      <PlannerProvider userId={user.id}>
+        <MorningLanding />
+        <div className="flex min-h-dvh flex-col">
+          <AppHeader />
+          <LocalModeBanner />
+          <Outlet />
+        </div>
+      </PlannerProvider>
     </DumpsProvider>
   )
+}
+
+/**
+ * Before noon, opening the app lands on Today instead of the board (once per browser session),
+ * so the morning starts from the queue, not from the pile of thoughts.
+ */
+function MorningLanding() {
+  const { pathname } = useLocation()
+  const navigate = useNavigate()
+  useEffect(() => {
+    try {
+      if (sessionStorage.getItem('minddump:landed')) return
+      sessionStorage.setItem('minddump:landed', '1')
+    } catch {
+      return
+    }
+    if (pathname === '/' && new Date().getHours() < 12) navigate('/today', { replace: true })
+    // Only on the first render of a session.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return null
 }
 
 function ThemedToaster() {
@@ -82,6 +111,10 @@ export default function App() {
             <Route path="/reset-password" element={<ResetPasswordPage />} />
             <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
               <Route index element={<BoardPage />} />
+              <Route path="today" element={<TodayPage />} />
+              <Route path="focus" element={<FocusPage />} />
+              <Route path="shutdown" element={<ShutdownPage />} />
+              <Route path="rules" element={<RulesPage />} />
               <Route path="history" element={<HistoryPage />} />
             </Route>
             <Route path="*" element={<Navigate to="/" replace />} />

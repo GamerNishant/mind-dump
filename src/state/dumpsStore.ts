@@ -169,8 +169,13 @@ export class DumpsStore {
 
   /** Adds one dump per entry, in the given order, above everything else. */
   async add(contents: string[]): Promise<boolean> {
+    return (await this.addMany(contents)) !== null
+  }
+
+  /** Like add(), but resolves to the new dumps (in the given order), or null if nothing was saved. */
+  async addMany(contents: string[]): Promise<Dump[] | null> {
     const texts = contents.map((c) => c.trim().slice(0, MAX_DUMP_LENGTH)).filter(Boolean)
-    if (texts.length === 0) return false
+    if (texts.length === 0) return null
     // If the board couldn't load, a strictly decreasing time-based slot still lands on top.
     const loaded = await this.ensureActiveLoaded()
     const top = loaded ? topPosition(this.state.active) : -Date.now()
@@ -186,7 +191,7 @@ export class DumpsStore {
     }))
     const ids = new Set(drafts.map((d) => d.id))
 
-    return this.mutate({
+    const ok = await this.mutate({
       keys: [...ids],
       apply: () => this.setState((s) => ({ active: [...drafts, ...s.active].sort(byPosition) })),
       rollback: () => this.setState((s) => ({ active: s.active.filter((d) => !ids.has(d.id)) })),
@@ -203,6 +208,7 @@ export class DumpsStore {
       },
       error: texts.length > 1 ? "Couldn't save those dumps" : "Couldn't save that dump",
     })
+    return ok ? drafts : null
   }
 
   /** Marks a dump done (moves it to history). Resolves to the dump as it was, for undo. */

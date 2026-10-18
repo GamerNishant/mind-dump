@@ -1,8 +1,9 @@
 import type { Dump } from '@/domain/dump'
+import type { PlannerDoc } from '@/domain/planner'
 import type { AppUser } from '@/domain/user'
 import { newId } from '@/lib/id'
 import { AppError } from '../errors'
-import type { AuthApi, AuthEvent, Backend, DumpsApi } from '../types'
+import type { AuthApi, AuthEvent, Backend, DumpsApi, PlannerApi } from '../types'
 import { hashPassword, newSalt } from './password'
 import { readJson, writeJson, type KeyValueStore } from './storage'
 
@@ -15,6 +16,7 @@ import { readJson, writeJson, type KeyValueStore } from './storage'
 const USERS_KEY = 'minddump:local:users'
 const SESSION_KEY = 'minddump:local:session'
 const dumpsKey = (userId: string) => `minddump:local:dumps:${userId}`
+const plannerKey = (userId: string) => `minddump:local:planner:${userId}`
 
 interface StoredUser extends AppUser {
   salt: string
@@ -194,5 +196,60 @@ export function createLocalBackend(store: KeyValueStore, options: LocalBackendOp
     }
   }
 
-  return { kind: 'local', auth, dumps }
+  function planner(userId: string): PlannerApi {
+    const key = plannerKey(userId)
+    const read = () => readJson<PlannerDoc[]>(store, key, [])
+    const write = (docs: PlannerDoc[]) => writeJson(store, key, docs)
+
+    return {
+      async list({ kinds, sinceDay }) {
+        const wanted = new Set(kinds)
+        return read().filter((d) => wanted.has(d.kind) && (d.day === null || d.day >= sinceDay))
+      },
+
+      async upsert(docs) {
+        const now = new Date().toISOString()
+        const all = read()
+        const index = new Map(all.map((d, i) => [d.id, i]))
+        for (const doc of docs) {
+          const at = index.get(doc.id)
+          if (at === undefined) {
+            index.set(doc.id, all.length)
+            all.push({ ...doc, createdAt: now, updatedAt: now })
+          } else {
+            // Kind and creation time are fixed after insert (mirrors the database trigger).
+            all[at] = { ...all[at], day: doc.day, data: doc.data, updatedAt: now }
+          }
+        }
+        write(all)
+      },
+
+      async insertMissing(docs) {
+        const now = new Date().toISOString()
+        const all = read()
+        const seen = new Set(all.map((d) => d.id))
+        for (const doc of docs) {
+          if (seen.has(doc.id)) continue
+          seen.add(doc.id)
+          all.push({ ...doc, createdAt: now, updatedAt: now })
+        }
+        write(all)
+      },
+
+      async remove(ids) {
+        const gone = new Set(ids)
+        write(read().filter((d) => !gone.has(d.id)))
+      },
+
+      watch(onChange) {
+        const onStorage = (e: StorageEvent) => {
+          if (e.key === key) onChange()
+        }
+        target?.addEventListener('storage', onStorage)
+        return () => target?.removeEventListener('storage', onStorage)
+      },
+    }
+  }
+
+  return { kind: 'local', auth, dumps, planner }
 }

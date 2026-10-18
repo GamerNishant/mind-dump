@@ -1,8 +1,9 @@
 import { createClient, type AuthError, type PostgrestError, type User } from '@supabase/supabase-js'
 import type { Dump, DumpStatus } from '@/domain/dump'
+import type { PlannerDoc } from '@/domain/planner'
 import type { AppUser } from '@/domain/user'
-import { AppError } from '../errors'
-import type { AuthApi, Backend, DumpsApi } from '../types'
+import { AppError, SetupRequiredError } from '../errors'
+import type { AuthApi, Backend, DumpsApi, PlannerApi } from '../types'
 
 interface DumpRow {
   id: string
@@ -24,6 +25,26 @@ const toDump = (r: DumpRow): Dump => ({
   createdAt: r.created_at,
   updatedAt: r.updated_at,
   completedAt: r.completed_at,
+})
+
+interface PlannerRow {
+  id: string
+  kind: string
+  day: string | null
+  data: unknown
+  created_at: string
+  updated_at: string
+}
+
+const PLANNER_COLUMNS = 'id,kind,day,data,created_at,updated_at'
+
+const toPlannerDoc = (r: PlannerRow): PlannerDoc => ({
+  id: r.id,
+  kind: r.kind,
+  day: r.day,
+  data: r.data,
+  createdAt: r.created_at,
+  updatedAt: r.updated_at,
 })
 
 const toUser = (u: User): AppUser => ({
@@ -60,6 +81,16 @@ function authError(error: AuthError): AppError {
 
 function dbError(error: PostgrestError): AppError {
   return new AppError(error.message || 'Could not reach the database.', { cause: error })
+}
+
+/** Like dbError, but a missing planner table means the planner migration hasn't been run. */
+function plannerError(error: PostgrestError): AppError {
+  const message = error.message ?? ''
+  const missing =
+    error.code === 'PGRST205' ||
+    error.code === '42P01' ||
+    (/planner_docs/.test(message) && /could not find|does not exist/i.test(message))
+  return missing ? new SetupRequiredError({ cause: error }) : dbError(error)
 }
 
 export function createSupabaseBackend(url: string, anonKey: string): Backend {
@@ -231,5 +262,67 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     }
   }
 
-  return { kind: 'supabase', auth, dumps }
+  function planner(userId: string): PlannerApi {
+    const table = () => sb.from('planner_docs')
+
+    return {
+      async list({ kinds, sinceDay }) {
+        if (kinds.length === 0) return []
+        const { data, error } = await table()
+          .select(PLANNER_COLUMNS)
+          .eq('user_id', userId)
+          .in('kind', [...kinds])
+          .or(`day.is.null,day.gte.${sinceDay}`)
+          .order('created_at', { ascending: true })
+          .limit(10_000)
+        if (error) throw plannerError(error)
+        return (data as PlannerRow[]).map(toPlannerDoc)
+      },
+
+      async upsert(docs) {
+        if (docs.length === 0) return
+        const { error } = await table().upsert(
+          docs.map((d) => ({ id: d.id, user_id: userId, kind: d.kind, day: d.day, data: d.data })),
+          { onConflict: 'id' },
+        )
+        if (error) throw plannerError(error)
+      },
+
+      async insertMissing(docs) {
+        if (docs.length === 0) return
+        const { error } = await table().upsert(
+          docs.map((d) => ({ id: d.id, user_id: userId, kind: d.kind, day: d.day, data: d.data })),
+          { onConflict: 'id', ignoreDuplicates: true },
+        )
+        if (error) throw plannerError(error)
+      },
+
+      async remove(ids) {
+        if (ids.length === 0) return
+        const { error } = await table().delete().eq('user_id', userId).in('id', ids)
+        if (error) throw plannerError(error)
+      },
+
+      watch(onChange) {
+        const onVisible = () => {
+          if (document.visibilityState === 'visible') onChange()
+        }
+        window.addEventListener('focus', onVisible)
+        document.addEventListener('visibilitychange', onVisible)
+        const filter = `user_id=eq.${userId}`
+        const channel = sb
+          .channel(`planner:${userId}`)
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'planner_docs', filter }, () => onChange())
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'planner_docs', filter }, () => onChange())
+          .subscribe()
+        return () => {
+          window.removeEventListener('focus', onVisible)
+          document.removeEventListener('visibilitychange', onVisible)
+          void sb.removeChannel(channel)
+        }
+      },
+    }
+  }
+
+  return { kind: 'supabase', auth, dumps, planner }
 }

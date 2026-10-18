@@ -15,6 +15,7 @@ Empty your head: every thought becomes a tile. Click a tile when it's handled, a
 - **Accounts**: email + password sign-up, sign-in, and password reset. Each user only ever sees their own data, enforced by Postgres row-level security.
 - **Live sync** across devices through Supabase Realtime. Light, dark and auto themes. Responsive from 320px phones to wide desktops.
 - Shortcuts: <kbd>n</kbd> or <kbd>/</kbd> focuses the composer; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> splits a multi-line dump.
+- **Planner (Today)**: tap **+ Today** on a tile to queue it; the tile stays in the dump. Today is an ordered queue of **Blocks** (timed deep work with a first action and a minimum) and **Tasks**, with caps. **Start** opens a focus timer. **Skip** asks you to start for 2 minutes, shrink it, or skip with a reason and a destination. Repeating tiles add themselves each day and unfinished items carry over. A **Morning Check** and an evening **Shutdown** bracket the day. An hour log shows where the time went, and **Rules** holds your if-then plans.
 
 Docs: [DESIGN.md](DESIGN.md) covers architecture and decisions; [FLOW.md](FLOW.md) traces the code from entry to exit.
 
@@ -52,7 +53,7 @@ The committed `.env` points at the live Supabase project, so `npm run dev` uses 
 ## Connect Supabase (free)
 
 1. Create a project at [supabase.com](https://supabase.com) (the free tier is fine).
-2. **SQL Editor → New query**: paste [`supabase/migrations/20261017000000_init.sql`](supabase/migrations/20261017000000_init.sql) and click **Run**.
+2. **SQL Editor → New query**: paste [`supabase/migrations/20261017000000_init.sql`](supabase/migrations/20261017000000_init.sql) and click **Run**. Do the same with [`supabase/migrations/20261018000000_planner.sql`](supabase/migrations/20261018000000_planner.sql) (the planner table). If you skip it, the Today page shows a setup card with the SQL and a link to the editor.
 3. **Project Settings → API**: copy the **Project URL** and the **anon / publishable key** into `.env`:
    ```
    VITE_SUPABASE_URL=https://xxxx.supabase.co

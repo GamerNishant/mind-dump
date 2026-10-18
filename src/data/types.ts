@@ -1,4 +1,5 @@
 import type { Dump } from '@/domain/dump'
+import type { PlannerDoc } from '@/domain/planner'
 import type { AppUser } from '@/domain/user'
 import type { PositionUpdate } from '@/lib/position'
 
@@ -50,8 +51,25 @@ export interface DumpsApi {
   watch(onChange: () => void): () => void
 }
 
+/** A planner document as written by the client (timestamps are owned by the backend). */
+export type PlannerDocInput = Pick<PlannerDoc, 'id' | 'kind' | 'day' | 'data'>
+
+/** Generic per-user document storage for the planner (see src/domain/planner.ts). */
+export interface PlannerApi {
+  /** Documents of the given kinds that are undated or dated on/after `sinceDay` (YYYY-MM-DD). */
+  list(query: { kinds: readonly string[]; sinceDay: string }): Promise<PlannerDoc[]>
+  /** Insert or replace whole documents. */
+  upsert(docs: PlannerDocInput[]): Promise<void>
+  /** Insert documents whose id doesn't exist yet; existing ones are left untouched. */
+  insertMissing(docs: PlannerDocInput[]): Promise<void>
+  remove(ids: string[]): Promise<void>
+  /** Notifies when data may have changed elsewhere (other tab/device). Returns unsubscribe. */
+  watch(onChange: () => void): () => void
+}
+
 export interface Backend {
   readonly kind: 'supabase' | 'local'
   readonly auth: AuthApi
   dumps(userId: string): DumpsApi
+  planner(userId: string): PlannerApi
 }

@@ -37,8 +37,9 @@ flowchart TD
   Routes --> RP["/reset-password → ResetPasswordPage"]
   Routes --> P["RequireAuth → AppLayout"]
   P --> D["DumpsProvider key=user.id"]
-  D --> H[AppHeader + LocalModeBanner]
-  D --> O["Outlet: / → BoardPage, /history → HistoryPage"]
+  D --> PP["PlannerProvider: store, Planner, RolloverRunner"]
+  PP --> H[AppHeader + LocalModeBanner + MorningLanding]
+  PP --> O["Outlet: / board, /today, /focus, /shutdown, /rules, /history"]
   Routes --> X["* → Navigate to /"]
 ```
 
@@ -52,6 +53,7 @@ flowchart TD
 | 4 | `RecoveryRedirect` | If `recovery` is true and the path is not `/reset-password`, it forces `/reset-password`. |
 | 5 | Route guards | `RequireAuth`: shows `<Splash/>` until `ready`, then sends signed-out users to `/login` with `state.from`. `PublicOnly`: sends signed-in users to `state.from` (if it is not `/login` or `/signup`) or to `/`. |
 | 6 | `AppLayout` → `DumpsProvider` ([src/state/DumpsProvider.tsx](src/state/DumpsProvider.tsx)) | Keyed by `user.id`. Its `useMemo` creates `new DumpsStore(backend.dumps(userId), msg => toast.error(msg))`. Its effect calls `store.start()`, which runs `loadActive()` and `api.watch(() => scheduleRefresh())`, and calls `store.stop()` on cleanup. |
+| 6b | `PlannerProvider` ([src/state/PlannerProvider.tsx](src/state/PlannerProvider.tsx)) | Inside `DumpsProvider`. Creates `new PlannerStore(backend.planner(userId), ALL_KINDS, sinceDay = today − 45 days, toast.error)` and `new Planner(store, dumpsStore)`. Its effect calls `store.start()` (`load()` + `watch`). Renders `RolloverRunner` (see §7.2). `MorningLanding` (App.tsx) sends the first `/` visit of a browser session to `/today` before noon. |
 | 7 | `BoardPage` ([src/pages/BoardPage.tsx](src/pages/BoardPage.tsx)) | `useNow()` sets a 60 s interval plus a `visibilitychange` re-tick. `usePersistentState('minddump:sort:<userId>')` loads the sort mode. A window `keydown` listener handles the `n`/`/` shortcut. Shows `SkeletonGrid` while `activeStatus` is `idle` or `loading`. |
 
 In dev, React `StrictMode` mounts effects twice. `DumpsStore.start()` returns early if already watching, and `stop()` resets `unwatch`, so the mount/unmount/mount cycle is safe.
@@ -353,3 +355,128 @@ There is no `beforeunload` handling. The session survives a reload (supabase-js 
 ### 6.4 Build output
 
 `npm run build` runs `tsc -b`, then `vite build` → `dist/` (with asset URLs prefixed by `VITE_BASE`). The GitHub Pages workflow also copies `dist/index.html` to `dist/404.html` before uploading. Hosts other than Pages use [vercel.json](vercel.json) or [public/_redirects](public/_redirects) for SPA rewrites.
+
+---
+
+## 7. Planner flows
+
+Code:
+- [src/state/planner.ts](src/state/planner.ts): the use-cases.
+- [src/state/plannerStore.ts](src/state/plannerStore.ts): the storage engine, using the same `mutate()` model as §2.
+- [src/lib/plan.ts](src/lib/plan.ts): the pure rules.
+- [src/state/PlannerProvider.tsx](src/state/PlannerProvider.tsx): the React binding.
+
+### 7.1 Load
+
+1. `PlannerStore.load()` calls `api.list({ kinds: ALL_KINDS, sinceDay })`.
+   - **Supabase:** `select … from planner_docs where user_id = me and kind in (…) and (day is null or day >= sinceDay)`.
+   - **Local:** filters the `minddump:local:planner:<userId>` array.
+2. The result decides the status:
+   - **Success:** the `docs` map fills and `status` becomes `'ready'`.
+   - **Missing table:** a `SetupRequiredError` sets `status: 'setup'`, with no toast. Today and Shutdown then render [SetupCard](src/components/today/SetupCard.tsx), which offers copy SQL, open the SQL editor, and reload.
+   - **Any other error:** `status: 'error'` plus a toast.
+3. Any of these triggers a debounced `load()` through `watch`: Realtime INSERT/UPDATE on `planner_docs`, window focus or visibility, or the local `storage` event.
+
+### 7.2 Day rollover (RolloverRunner)
+
+The runner starts once both stores are `ready`, and runs again whenever the planner docs, the board dumps or the clock (`useNow`) change.
+1. It works out `today = planDay(now, settings.dayStartHour)`, with the 3 AM boundary.
+2. `planRollover({ docs, today, activeDumps })` returns three lists:
+   - **`updates`:**
+     - Yesterday's open, non-routine items get `day = today`, `carriedFrom` and `carryCount + 1`, and move to the end of the order.
+     - Open routines from earlier days get `status: 'skipped'` with reason `unresolved`.
+     - `tile_meta.carryCount` is updated to match.
+   - **`creates`:** a routine item for each board tile whose `tile_meta.repeat` includes today's weekday and that has no item yet. The id is `stableId('today_item','routine',dumpId,today)`.
+   - **`stale`:** open items older than yesterday. [RestartCard](src/components/today/RestartCard.tsx) shows these.
+3. The runner applies the writes:
+   - `updates` go through `store.put`.
+   - `creates` go through `store.create`, which runs a server `upsert … ignoreDuplicates` and then a refresh.
+   - Each write is attempted at most once per session.
+
+### 7.3 "+ Today" from a tile
+
+The `DumpCard` button calls `BoardPage.onAddToday(dump)`, which calls `planner.addFromDump(dump)`. Three outcomes:
+1. **Already queued today** (and not skipped): returns `{ ok: false, reason: 'exists' }`, and the toast says "Already in Today".
+2. **No room** (not a habit, and `hasRoomFor` fails for its type): returns `'full'`, with an error toast offering "Open Today".
+3. **Added:** puts a `today_item` at the end of the queue.
+   - Type, minutes and minimum come from `tile_meta`.
+   - The first action is "Resume: <Bookmark>".
+   - A toast offers Undo, which calls `planner.removeItem`.
+
+The tile stays on the board. `useToday().inToday` drives its "In Today" chip.
+
+### 7.4 Today screen
+
+[TodayPage](src/pages/TodayPage.tsx) reads `useToday()`.
+- **While not ready:** it shows the loading skeleton, the error state or the setup card.
+- **Once ready, top to bottom:** the header ([TodayHeader](src/components/today/TodayHeader.tsx)), `RestartCard`, `MorningCheckCard`, `NextCard` and `QueueList` ([QueueList.tsx](src/components/today/QueueList.tsx)), `AddItemForm`, `HourLogStrip`, and the `SkipSheet`.
+- **While a focus session runs:** a sticky banner links to `/focus`.
+
+The actions on this screen:
+- **Add text:** `planner.addText(text, type)` calls `dumpsStore.addMany([text])` to create the tile, then `addFromDump`.
+- **Reorder** (dnd-kit, using the grip handle): `planner.reorder(day, movedId, orderedIds)`. `planMove` writes one `order` value, or rebalances them all when needed.
+- **Done:** `planner.complete(id, minMet)`. For tasks, the toast offers "Also clear the tile", which calls `dumpsStore.complete`.
+- **Reopen:** `planner.reopen`.
+- **Edit type, minutes, first action or minimum:** `planner.updateItem`.
+  - Switching to a block checks the block cap.
+  - Type, minutes and minimum are remembered in `tile_meta` for next time.
+
+### 7.5 Skip sheet (Start, Shrink, Say)
+
+1. **Do just 2 minutes:** `planner.startFocus(id, 'starter')`, then `/focus`.
+2. **Shrink to 10 min** (blocks only): `startFocus(id, 'shrink')` sets the item's minutes to 10, then `/focus`.
+3. **Say:** a reason and a destination are both required. `planner.skip(id, reason, to)` then does one of:
+   - `later`: moves the item to the end of the order.
+   - `tomorrow`: sets `day + 1`.
+   - `dump`: sets `status: 'skipped'`. Undo calls `reopen`.
+
+   Every skip appends a skip event and increments `tile_meta.skipCount`. The sheet shows any active rules whose `reason` matches.
+
+### 7.6 Focus block
+
+1. **Start:** `startFocus` returns the running session if there is one. Otherwise it puts a new `focus_session`. `plannedMin` is the block's minutes, 25 for a task, or 10 when shrunk.
+2. **Running:** [FocusPage](src/pages/FocusPage.tsx) ticks every second.
+   - `focusRemainingMs` is planned time minus (now − startedAt − pausedMs).
+   - Pause and resume store `pausedAt` and `pausedMs`.
+   - "+10 min" extends `plannedMin`.
+   - "Park a thought" calls `dumpsStore.add([text])`.
+3. **At 0:** a chime plays, the tab title flashes, and the End dialog opens, once per planned length.
+4. **End:** `planner.endFocus(id, { minMet, stoppedAt })` then:
+   - ends the session;
+   - marks the item done if the minimum was met;
+   - saves "where did you stop?" as the item's first action and as `tile_meta.resumeNote` (the Bookmark);
+   - marks the hours the block mostly covered as Study, filling empty cells only.
+
+### 7.7 Morning Check, Restart
+
+**[MorningCheckCard](src/components/today/MorningCheckCard.tsx)** shows until it is done, only before 2 PM, and is hidden while the Restart card is showing.
+- Block 1 is the first block in the queue. The card asks Yes / Partly / No and "Stopped at?", then calls `planner.morningCheck(day, result, note)`.
+  - Yes completes Block 1.
+  - The note updates Block 1's first action and the Bookmark.
+- Carried items each offer Keep, or "Not today" (`skip … 'dump'`).
+- Dismissing the card calls `morningCheck(day, null, '')`.
+
+**[RestartCard](src/components/today/RestartCard.tsx)** offers two buttons:
+- **Restart:** `planner.restart(day, staleIds)` skips the stale items with reason `restart` and sets `day_plan.restartAt`.
+- **Bring them into today:** `planner.bringBack`.
+
+### 7.8 Shutdown
+
+[ShutdownPage](src/pages/ShutdownPage.tsx) runs a 10:00 countdown. At 0 it collapses to Block 1 only. The sections, in order:
+1. **Resolve open items:** Done, or Skip with a reason (to tomorrow or to the dump).
+2. **Tomorrow's queue:** `planner.addFromDump(dump, tomorrow)`. Routine tiles are listed as "adds itself".
+3. **Block 1:** its first action and minimum, saved with `updateItem`.
+4. **Checks:** the food checkbox and an optional hour-log strip.
+5. **Shutdown complete:** `planner.shutdown(day, { tomorrowFirst, foodSorted })` writes `day_plan` with `shutdownAt`, `blocksDone` and `floorMet`, then goes to `/today`.
+
+### 7.9 Hour log, rules, settings, repeat
+
+- **[HourLogStrip](src/components/today/HourLogStrip.tsx):** select hours (tap, shift-click a range, or long-press a range), then pick a category chip. This calls `planner.setHours(day, hours, category | null)`. There is one `hour_log` doc per day.
+- **[RulesPage](src/pages/RulesPage.tsx):** calls `planner.seedRules()` once per account (tracked by `settings.rulesSeeded`), then `saveRule` / `removeRule`. Plan settings call `planner.updateSettings`.
+- **[EditDumpDialog](src/components/EditDumpDialog.tsx):** Save calls `planner.setTileMeta(dumpId, changedFields)` with any changed repeat days, type, minutes, habit, minimum or Bookmark.
+
+### 7.10 Planner error paths
+
+- **Failed write:** it rolls back, shows a toast (`mutate()`) and queues a refresh. A missing table sets `status` to `setup` instead of showing a toast.
+- **Deleted tiles:** items keep their own `title`, so the queue still renders. "+ Today" is only offered on board tiles.
+- **Rollover writes:** each is tried once per session per document, so a failing write can't loop.
