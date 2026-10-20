@@ -1,11 +1,12 @@
 import { useId, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
 import { Check, ChevronRight, Flame, Plus, X } from 'lucide-react'
+import { celebrate } from '@/components/celebrate'
 import { Button, focusRing } from '@/components/ui'
 import { MAX_HABIT_NAME, type Habit } from '@/domain/plan'
 import { usePersistentState } from '@/hooks/usePersistentState'
 import { cn } from '@/lib/cn'
-import { currentStreak, isDone, missedLast } from '@/lib/habits'
+import { currentStreak, isDone, isDue, missedLast } from '@/lib/habits'
 import type { Doc } from '@/lib/plan'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
 
@@ -82,16 +83,20 @@ export function HabitButton({ habit, today }: { habit: Doc<Habit>; today: string
   const streak = currentStreak(habit.data, today)
   const nudge = !done && missedLast(habit.data, today)
 
-  const toggle = async () => {
+  const toggle = async (target: HTMLElement) => {
     const next = await planner.toggleHabit(habit.id, today)
-    if (next) navigator.vibrate?.(12)
+    if (!next) return
+    navigator.vibrate?.(12)
+    const due = planner.habits().filter((h) => isDue(h.data, today))
+    const allDone = due.every((h) => isDone(h.data, today))
+    celebrate(allDone ? null : target, allDone ? 'big' : 'small')
   }
 
   return (
     <button
       type="button"
       aria-pressed={done}
-      onClick={() => void toggle()}
+      onClick={(e) => void toggle(e.currentTarget)}
       className={cn(
         'group flex min-h-14 w-full items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.98] motion-reduce:active:scale-100',
         focusRing,

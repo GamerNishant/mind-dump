@@ -1,4 +1,6 @@
 import { Link } from 'react-router'
+import { useUser } from '@/auth/AuthProvider'
+import { greetingFor, momentumLine } from '@/lib/greeting'
 import { Check, ListChecks, Moon, Quote } from 'lucide-react'
 import { buttonClass } from '@/components/ui'
 import { cn } from '@/lib/cn'
@@ -10,6 +12,10 @@ const DOT_LABEL: Record<DotState, string> = { hit: 'Floor hit', miss: 'missed', 
 /** "Today" title, Floor counters and dots, Never-miss-twice line, Shutdown and Rules links. */
 export function TodayHeader({ view }: { view: TodayView }) {
   const { items, settings, plan, dots, now, today, quote, habitsDue, habitsDoneToday } = view
+  const user = useUser()
+  const firstName = user.displayName.trim().split(/\s+/)[0] || 'there'
+  const doneCount = items.filter((i) => i.data.status === 'done').length + habitsDoneToday
+  const openCount = items.filter((i) => i.data.status === 'open').length + (habitsDue.length - habitsDoneToday)
   const blocks = blocksDone(items)
   const tasks = items.filter((i) => i.data.type === 'task' && !i.data.habit && i.data.status !== 'skipped')
   const tasksDone = tasks.filter((i) => i.data.status === 'done').length
@@ -23,8 +29,12 @@ export function TodayHeader({ view }: { view: TodayView }) {
     <header>
       <div className="flex flex-wrap items-start gap-x-3 gap-y-3">
         <div className="min-w-0">
+          <p className="text-sm font-medium text-accent">
+            {greetingFor(hour, settings.dayStartHour)}, {firstName}
+          </p>
           <h1 className="text-2xl font-semibold tracking-tight">Today</h1>
           <p className="text-sm text-ink-muted">{dateText}</p>
+          <p className="mt-1 text-sm text-ink">{momentumLine(doneCount, openCount)}</p>
         </div>
         <div className="ml-auto flex items-center gap-1.5">
           <Link to="/rules" className={buttonClass('ghost', 'sm', 'h-10')}>

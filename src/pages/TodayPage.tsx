@@ -3,6 +3,7 @@ import { Link } from 'react-router'
 import { ArrowRight, RefreshCw, Sunrise, Timer } from 'lucide-react'
 import { HabitStackCard } from '@/components/habits/HabitStackCard'
 import { AddItemForm } from '@/components/today/AddItemForm'
+import { EditItemDialog } from '@/components/today/EditItemDialog'
 import { HourLogStrip } from '@/components/today/HourLogStrip'
 import { MorningCheckCard } from '@/components/today/MorningCheckCard'
 import { NextCard, QueueList } from '@/components/today/QueueList'
@@ -23,6 +24,7 @@ export function TodayPage() {
   const planner = usePlanner()
   const view = useToday()
   const [skipping, setSkipping] = useState<Doc<TodayItem> | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
 
   if (view.status === 'idle' || view.status === 'loading') {
     return (
@@ -85,8 +87,12 @@ export function TodayPage() {
             />
           ) : (
             <>
-              {view.next ? <NextCard view={view} onSkip={setSkipping} /> : <QueueClear shutdownDone={!!view.plan.shutdownAt} />}
-              <QueueList view={view} onSkip={setSkipping} />
+              {view.next ? (
+                <NextCard view={view} onSkip={setSkipping} onEdit={(i) => setEditingId(i.id)} />
+              ) : (
+                <QueueClear shutdownDone={!!view.plan.shutdownAt} />
+              )}
+              <QueueList view={view} onSkip={setSkipping} onEdit={(i) => setEditingId(i.id)} />
             </>
           )}
 
@@ -95,6 +101,11 @@ export function TodayPage() {
         </div>
 
         <SkipSheet item={skipping} onClose={() => setSkipping(null)} />
+        <EditItemDialog
+          item={view.items.find((i) => i.id === editingId && i.data.status === 'open') ?? null}
+          view={view}
+          onClose={() => setEditingId(null)}
+        />
       </main>
     </>
   )

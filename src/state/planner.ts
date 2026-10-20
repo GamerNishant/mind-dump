@@ -209,6 +209,46 @@ export class Planner {
     return this.putItem(doc, { status: 'open', minMet: false, doneAt: null })
   }
 
+  /**
+   * "No longer relevant": take an open item off its day without a skip reason. It closes as
+   * skipped (reason `not_relevant`), so it is still listed under Done & skipped and can be
+   * reopened. With `clearTile`, its board tile is also cleared to History.
+   * Resolves to whether the tile was cleared (for Undo), or null on failure.
+   */
+  async dismiss(id: string, opts: { clearTile?: boolean } = {}): Promise<{ tileCleared: boolean } | null> {
+    const doc = this.item(id)
+    if (!doc) return null
+    await this.closeSessionFor(id, false)
+    const event = { at: new Date().toISOString(), reason: 'not_relevant' as const, to: 'dump' as const }
+    const ok = await this.putItem(doc, { status: 'skipped', skips: [...doc.data.skips, event] }, {}, "Couldn't remove that")
+    if (!ok) return null
+    const { dumpId } = doc.data
+    const onBoard = !!dumpId && this.dumps.getState().active.some((d) => d.id === dumpId)
+    const tileCleared = !!opts.clearTile && onBoard && !!(await this.dumps.complete(dumpId!))
+    return { tileCleared }
+  }
+
+  /**
+   * Rename an item. Its tile is renamed too (the first line of the tile's text), so the dump
+   * stays the single source and future "+ Today"s use the new name.
+   */
+  async retitle(id: string, title: string): Promise<boolean> {
+    const doc = this.item(id)
+    const next = title.replace(/\s+/g, ' ').trim().slice(0, 300)
+    if (!doc || !next) return false
+    if (next === doc.data.title) return true
+    const ok = await this.putItem(doc, { title: next }, {}, "Couldn't rename that")
+    const dump = doc.data.dumpId ? this.dumps.getState().active.find((d) => d.id === doc.data.dumpId) : undefined
+    if (ok && dump) {
+      const lines = dump.content.split(/\r?\n/)
+      const first = lines.findIndex((l) => l.trim())
+      if (first >= 0) lines[first] = next
+      else lines.unshift(next)
+      await this.dumps.edit(dump.id, lines.join('\n'))
+    }
+    return ok
+  }
+
   /** Remove an item added by mistake (undo of "+ Today"). Items are otherwise never deleted. */
   removeItem(id: string): Promise<boolean> {
     return this.store.remove(id, "Couldn't remove that")

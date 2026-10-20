@@ -22,7 +22,7 @@ export const ALL_KINDS: readonly string[] = Object.values(KIND)
 export type ItemType = 'block' | 'task'
 export type ItemStatus = 'open' | 'done' | 'skipped'
 
-export const SKIP_REASONS = ['tired', 'too_big', 'interrupted', 'didnt_want', 'phone', 'forgot'] as const
+export const SKIP_REASONS = ['tired', 'too_big', 'interrupted', 'didnt_want', 'phone', 'forgot', 'not_relevant'] as const
 /**
  * Reasons the user picks are SKIP_REASONS. System reasons: `unresolved` (a routine left open
  * when its day ended, or a duplicate merged at rollover), `restart` (closed by Restart),
@@ -41,6 +41,7 @@ export const SKIP_REASON_LABEL: Record<SkipReason, string> = {
   restart: 'Restart',
   not_today: 'Not today',
   deleted: 'Tile removed',
+  not_relevant: 'No longer relevant',
 }
 
 /** Where a skipped item goes: end of today's queue, tomorrow, or off Today (it stays in the dump). */

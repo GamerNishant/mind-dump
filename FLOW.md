@@ -530,3 +530,27 @@ Code: [src/lib/habits.ts](src/lib/habits.ts) (pure rules), `Planner` habit metho
 ### 7.14 Daily quote
 
 `useToday()` computes `quote: quoteOfDay(today)`. That is a deterministic index into the offline `QUOTES` list, so the quote changes at the planner day boundary (3 AM), not at midnight. `TodayHeader` renders it as a `<figure>` with a `<blockquote>` and a `<figcaption>`.
+
+### 7.15 Edit or remove a queue item
+
+1. **Open the dialog.** The pencil on a queue row ("Edit or remove: …"), the row's title, or the pencil on the Next card sets `editingId` in `TodayPage`. `EditItemDialog` receives the item, but only while it is still open.
+2. **Save.** Each step runs only if that field changed:
+   1. `planner.retitle(id, name)` renames the item, then rewrites the first non-empty line of its tile with `dumps.edit`.
+   2. `planner.updateItem(id, { firstAction, minimum })` saves the text fields.
+   3. `planner.updateItem(id, { type, minutes })` runs on its own, so if the block cap refuses the switch to Block (a toast says so), the other edits are already saved.
+   4. `planner.setTileMeta(dumpId, { priority })` saves the priority.
+3. **Remove.** **Remove** asks how to remove it:
+   - **Just remove it from Today**, which calls `planner.dismiss(id)`.
+   - **Remove and clear the tile** (shown only while the tile is on the board), which calls `planner.dismiss(id, { clearTile: true })`. This also runs `dumps.complete(dumpId)`.
+
+   `dismiss` ends any focus block running on the item, then writes `status: 'skipped'` with a `not_relevant` skip event. The toast's **Undo** calls `planner.reopen(id)`, plus `dumps.restore(tile, 'original')` if the tile was cleared.
+
+### 7.16 Celebrations and greeting
+
+- Places that call `celebrate(origin?, size)` ([src/components/celebrate.ts](src/components/celebrate.ts)):
+  - `BoardPage.complete`: a small burst from the tile;
+  - `useItemActions.cheer` after a task or block is Done: big, plus a "Queue clear!" toast, when nothing is left open;
+  - `HabitButton`: small, from the button, or big when every due habit is done;
+  - `FocusPage`'s end dialog: big, when the minimum was met.
+- `celebrate` appends a set of `.confetti-piece` spans, animates each with `element.animate`, and removes it when the animation finishes. It returns early if reduced motion is preferred or `Element.animate` doesn't exist.
+- `TodayHeader` shows `greetingFor(hour, dayStartHour)` with the user's first name, and `momentumLine(done, open)`. "Done" counts finished items and habits; "open" counts open items and habits still due.

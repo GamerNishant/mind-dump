@@ -6,6 +6,7 @@ import { useUser } from '@/auth/AuthProvider'
 import { Composer } from '@/components/Composer'
 import { DumpGrid } from '@/components/DumpGrid'
 import { EditDumpDialog } from '@/components/EditDumpDialog'
+import { celebrate } from '@/components/celebrate'
 import { Button, EmptyState, focusRing } from '@/components/ui'
 import type { Dump } from '@/domain/dump'
 import { useNow } from '@/hooks/useNow'
@@ -113,6 +114,7 @@ export function BoardPage() {
     (dump: Dump) => {
       if (exitingRef.current.has(dump.id)) return
       const restoreFocus = focusAfterRemoval(dump.id)
+      celebrate(document.querySelector(`[data-dump-id="${dump.id}"]`), 'small')
       setExiting((s) => new Set(s).add(dump.id))
       window.setTimeout(
         () => {

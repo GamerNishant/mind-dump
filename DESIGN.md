@@ -27,6 +27,8 @@ Mind Dump is a single-page web app for emptying your head and then doing the rig
 | **Habit stack**: daily habits with one-tap logging, streaks and consistency, shown on Today and in Shutdown (see §8.5) | [src/pages/HabitsPage.tsx](src/pages/HabitsPage.tsx), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx), [src/lib/habits.ts](src/lib/habits.ts) |
 | **Hour log Week view** and **named "Other" hours** (see §8.5) | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx), [HourWeekView.tsx](src/components/today/HourWeekView.tsx), [src/lib/hours.ts](src/lib/hours.ts) |
 | **Daily quote** on Today | [src/lib/quotes.ts](src/lib/quotes.ts), [TodayHeader.tsx](src/components/today/TodayHeader.tsx) |
+| **Edit a queue item** (name, priority, Block/Task, length, first action, minimum) or **remove it** when it's no longer relevant, optionally clearing its tile | [EditItemDialog.tsx](src/components/today/EditItemDialog.tsx), `Planner.retitle` / `Planner.dismiss` |
+| **Sunrise theme** and small rewards: warm colours, a greeting with a kind progress line, and confetti when you finish things | [src/index.css](src/index.css), [celebrate.ts](src/components/celebrate.ts), [lib/greeting.ts](src/lib/greeting.ts) |
 | **Download my data**: a JSON backup of everything, from the account menu | [src/data/exportData.ts](src/data/exportData.ts), [AppHeader.tsx](src/components/AppHeader.tsx) |
 
 ## 2. Tech stack
@@ -176,6 +178,16 @@ The migration is idempotent; run it once in the Supabase SQL editor.
 - Free Supabase projects pause after inactivity (README).
 
 ### Notable UX/UI patterns
+
+- **Sunrise palette** ([src/index.css](src/index.css)): a pending list drains energy, so the surfaces are meant to feel warm and light rather than clinical.
+  - Light mode: a cream canvas (`#fdf8f3`), warm lines, plum-tinted ink, and a fixed, decorative `body::before` glow in peach, lavender and mint.
+  - Dark mode: a deep plum night with a faint violet, rose and teal glow.
+  - Primary buttons use a violet → rose gradient (`--accent-from` → `--accent-to`).
+  - Every text token was checked at ≥ 4.5:1 against canvas, card and sunken surfaces (the lowest is 4.99:1), and white text on both gradient ends is ≥ 5.6:1.
+- **Rewards, not guilt**:
+  - [celebrate.ts](src/components/celebrate.ts) fires a small confetti burst when a tile is cleared, a Today item is done or a habit is ticked. It fires a big one when the queue empties, every due habit is done, or a block ends with its minimum met.
+  - It uses only the Web Animations API and is skipped under `prefers-reduced-motion`.
+  - Today greets you by first name, and `momentumLine` ([lib/greeting.ts](src/lib/greeting.ts)) gives a kind, specific progress line ("3 done today. Keep the streak rolling.") instead of a count of what's left.
 
 - **No theme flash**: an inline script in [index.html](index.html) reads `minddump:theme` and sets the `.dark` class and `theme-color` metas before React loads. `ThemeProvider` then keeps them in sync with `useLayoutEffect`.
 - **Semantic colour tokens** (`--canvas`, `--card`, `--ink`, `--accent`, ...) in [src/index.css](src/index.css) are redefined under `.dark` and exposed to Tailwind with `@theme inline`. Dark mode uses `@custom-variant dark (&:where(.dark, .dark *))`.
@@ -355,6 +367,12 @@ All of these were added without any SQL: they are a new `kind` (`habit`) and new
 
   You can step back about 6 weeks, which is the planner's 45-day load window.
 - **Quotes** are a fixed offline list ([lib/quotes.ts](src/lib/quotes.ts)), and `quoteOfDay(day)` picks one per planner day, so nothing is fetched. Uncertain attributions are marked "(attributed)" or "Unknown".
+- **Editing and removing queue items** ([EditItemDialog.tsx](src/components/today/EditItemDialog.tsx)):
+  - Every queue row and the Next card has a pencil, and tapping a row's title opens it too.
+  - **Rename** (`Planner.retitle`) also rewrites the first line of the tile, so the dump stays the single source.
+  - **Priority** writes the tile's `tile_meta`.
+  - **Remove** (`Planner.dismiss`) closes the item as skipped with the reason `not_relevant`, so "nothing leaves Today silently" still holds. You can optionally clear its tile to History as well, and Undo reopens the item and restores the tile.
+  - "No longer relevant" is also one of the reasons in the Skip sheet and in Shutdown.
 - **The backup** ([data/exportData.ts](src/data/exportData.ts)) reads straight from the backend rather than the stores. It therefore includes all history and every planner document, with no date cut-off.
 
 ### 8.6 How to extend the planner

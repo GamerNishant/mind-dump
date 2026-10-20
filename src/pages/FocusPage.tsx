@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { celebrate } from '@/components/celebrate'
 import { Navigate, useNavigate } from 'react-router'
 import { Pause, Play, Plus, Square } from 'lucide-react'
 import { toast } from 'sonner'
@@ -236,6 +237,7 @@ function FocusView({ session }: { session: Doc<FocusSession> }) {
         onSubmit={async (minMet, stoppedAt) => {
           setBusy(true)
           const ok = await planner.endFocus(session.id, { minMet, stoppedAt })
+          if (ok && minMet) celebrate(null, 'big')
           setBusy(false)
           if (!ok) return
           setEndOpen(false)

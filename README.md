@@ -18,6 +18,8 @@ Empty your head: every thought becomes a tile. Click a tile when it's handled, a
 - **Planner (Today)**: tap **+ Today** on a tile to queue it; the tile stays in the dump. Today is an ordered queue of **Blocks** (timed deep work with a first action and a minimum) and **Tasks**, with caps. **Start** opens a focus timer. **Skip** asks you to start for 2 minutes, shrink it, or skip with a reason and a destination. Repeating tiles add themselves each day and unfinished items carry over. A **Morning Check** and an evening **Shutdown** bracket the day. An hour log shows where the time went, by day or by **week**; for "Other" hours you can say what they were. **Rules** holds your if-then plans, and a short quote greets you each day.
 - **Habits**: a habit stack for small daily things. They show highlighted on Today, one tap logs them, and the Habits page shows streaks, consistency and history.
 - **Priority**: mark tiles High, Medium or Low (in the edit dialog). They get a flag and can be sorted by priority.
+- **Edit or remove queue items**: tap the pencil on any Today item to rename it, set its priority or kind, or remove it when it's no longer relevant (optionally clearing its tile too). Undo is always offered.
+- A warm "Sunrise" look, a greeting by name, and small confetti bursts when you finish things.
 - **Backup**: **Download my data** in the account menu saves everything as a JSON file.
 
 Docs: [DESIGN.md](DESIGN.md) covers architecture and decisions; [FLOW.md](FLOW.md) traces the code from entry to exit.

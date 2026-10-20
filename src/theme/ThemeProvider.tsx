@@ -41,7 +41,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     document.documentElement.classList.toggle('dark', resolved === 'dark')
     // Browser UI (mobile address bar) follows the in-app choice, not just the OS setting.
     document.querySelectorAll('meta[name="theme-color"]').forEach((m) => {
-      m.setAttribute('content', resolved === 'dark' ? '#0c0c11' : '#f6f6f9')
+      m.setAttribute('content', resolved === 'dark' ? '#120f1d' : '#fdf8f3')
       m.removeAttribute('media')
     })
   }, [resolved])

@@ -232,6 +232,76 @@ test('no horizontal overflow on /habits and the Week view at phone width', async
   await noHorizontalOverflow(page)
 })
 
+const queue = (page: Page) => page.getByRole('list', { name: "Today's queue" })
+const queueRow = (page: Page, text: string) => queue(page).locator('li').filter({ hasText: text })
+
+async function addTodayItem(page: Page, text: string) {
+  await page.getByRole('textbox', { name: 'Add to Today' }).fill(text)
+  await page.getByRole('button', { name: 'Add', exact: true }).click()
+  await expect(queueRow(page, text)).toBeVisible()
+}
+
+test('Queue: edit an item (rename, priority, focus block) from its pencil', async ({ page }) => {
+  await signUp(page)
+  await openToday(page)
+  await addTodayItem(page, 'Call the bank')
+  await addTodayItem(page, 'Buy groceries')
+
+  await queueRow(page, 'Buy groceries').getByRole('button', { name: 'Edit or remove: Buy groceries' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit item' })
+  await dialog.getByLabel('Name').fill('Buy groceries for the week')
+  await dialog.getByRole('group', { name: 'Priority' }).getByRole('button', { name: 'High' }).click()
+  await dialog.getByRole('group', { name: 'Kind' }).getByRole('button', { name: 'Focus block' }).click()
+  await dialog.getByRole('group', { name: 'Block length' }).getByRole('button', { name: '25 min' }).click()
+  await dialog.getByLabel('First action').fill('Open the list')
+  await dialog.getByRole('button', { name: 'Save' }).click()
+  await expect(dialog).toBeHidden()
+
+  const row = queueRow(page, 'Buy groceries for the week')
+  await expect(row).toContainText('High')
+  await expect(row).toContainText('Block')
+  await expect(row).toContainText('Open the list')
+  // The tile on the board was renamed too, and carries the priority.
+  await nav(page).getByRole('link', { name: 'Dump', exact: true }).click()
+  await expect(tileItem(page, 'Buy groceries for the week')).toContainText('High')
+})
+
+test('Queue: remove an item that is no longer relevant (keep or clear the tile), with Undo', async ({ page }) => {
+  await signUp(page)
+  await openToday(page)
+  await addTodayItem(page, 'Renew gym pass')
+  await addTodayItem(page, 'Reply to old thread')
+
+  // 1. Just remove it from Today: the tile stays on the board.
+  await queueRow(page, 'Renew gym pass').getByRole('button', { name: 'Edit or remove: Renew gym pass' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Edit item' })
+  await dialog.getByRole('button', { name: 'Remove' }).click()
+  await dialog.getByRole('button', { name: /Just remove it from Today/ }).click()
+  await expect(queueRow(page, 'Renew gym pass')).toHaveCount(0)
+  await page.locator('[data-sonner-toast]').filter({ hasText: 'Removed from Today' }).getByRole('button', { name: 'Undo' }).click()
+  await expect(queueRow(page, 'Renew gym pass')).toBeVisible()
+
+  // 2. Remove and clear the tile: gone from the board, listed as "No longer relevant".
+  await queueRow(page, 'Reply to old thread').getByRole('button', { name: 'Edit or remove: Reply to old thread' }).click()
+  await dialog.getByRole('button', { name: 'Remove' }).click()
+  await dialog.getByRole('button', { name: /Remove and clear the tile/ }).click()
+  await expect(queueRow(page, 'Reply to old thread')).toHaveCount(0)
+  await page.getByRole('button', { name: /Done & skipped/ }).click()
+  await expect(page.locator('#closed-items')).toContainText('No longer relevant')
+  await nav(page).getByRole('link', { name: 'Dump', exact: true }).click()
+  await expect(tile(page, 'Renew gym pass')).toBeVisible()
+  await expect(tile(page, 'Reply to old thread')).toHaveCount(0)
+})
+
+test('Today greets you by name with a kind progress line', async ({ page }) => {
+  await signUp(page, 'Asha Rao')
+  await openToday(page)
+  await expect(page.getByText(/^(Good (morning|afternoon|evening)|Still up), Asha$/)).toBeVisible()
+  await expect(page.getByText('A fresh page. Add one thing that matters.')).toBeVisible()
+  await addTodayItem(page, 'Water the plants')
+  await expect(page.getByText(/Start with the smallest thing/)).toBeVisible()
+})
+
 for (const theme of ['light', 'dark'] as const) {
   test(`features visual tour (${theme})`, async ({ page }, info) => {
     test.setTimeout(120_000)
@@ -287,7 +357,23 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Save' }).click()
     await clearToasts(page)
     await settle()
+    await page.getByRole('textbox', { name: 'Add to Today' }).fill('Plan the weekend trip')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await page.getByRole('textbox', { name: 'Add to Today' }).fill('Email the landlord')
+    await page.getByRole('button', { name: 'Add', exact: true }).click()
+    await expect(page.getByRole('list', { name: "Today's queue" })).toContainText('Email the landlord')
+    await clearToasts(page)
+    await settle()
     await shot('today')
+    await page.getByRole('button', { name: 'Edit or remove: Email the landlord' }).click()
+    await page.getByRole('dialog', { name: 'Edit item' }).getByRole('group', { name: 'Priority' }).getByRole('button', { name: 'High' }).click()
+    await settle()
+    await shot('edit-item', false)
+    await page.getByRole('dialog', { name: 'Edit item' }).getByRole('button', { name: 'Remove' }).click()
+    await settle()
+    await shot('remove-item', false)
+    await page.getByRole('dialog', { name: 'Edit item' }).getByRole('button', { name: 'Back' }).click()
+    await page.getByRole('dialog', { name: 'Edit item' }).getByRole('button', { name: 'Cancel' }).click()
     await page.getByRole('tab', { name: 'Week' }).click()
     await settle()
     await page.getByRole('tab', { name: 'Week' }).scrollIntoViewIfNeeded()

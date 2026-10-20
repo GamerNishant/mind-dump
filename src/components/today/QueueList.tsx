@@ -15,8 +15,9 @@ import {
 } from '@dnd-kit/core'
 import { arrayMove, SortableContext, sortableKeyboardCoordinates, useSortable, verticalListSortingStrategy } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
-import { Check, ChevronDown, GripVertical, Play, Repeat, RotateCcw, SkipForward } from 'lucide-react'
+import { Check, ChevronDown, GripVertical, Pencil, Play, Repeat, RotateCcw, SkipForward } from 'lucide-react'
 import { toast } from 'sonner'
+import { celebrate } from '@/components/celebrate'
 import { Button, focusRing } from '@/components/ui'
 import { BLOCK_MINUTES, CARRY_WARN, SKIP_REASON_LABEL, PRIORITY_LABEL, type Priority, type TodayItem } from '@/domain/plan'
 import { PRIORITY_CHIP, PriorityFlag } from '@/components/PriorityFlag'
@@ -41,6 +42,13 @@ function useItemActions(view: TodayView) {
 
   const undo = (item: Item) => ({ label: 'Undo', onClick: () => void planner.reopen(item.id) })
 
+  /** A small burst for each finish; a big one (and a cheer) when the queue is clear. */
+  const cheer = (item: Item) => {
+    const left = view.items.filter((i) => i.data.status === 'open' && i.id !== item.id).length
+    celebrate(null, left === 0 ? 'big' : 'small')
+    if (left === 0) toast.success('Queue clear! Everything planned is handled.', { description: 'Take a breath. You earned it.' })
+  }
+
   return {
     async start(item: Item) {
       if (view.focus) {
@@ -54,6 +62,7 @@ function useItemActions(view: TodayView) {
 
     async completeTask(item: Item) {
       if (!(await planner.complete(item.id))) return
+      cheer(item)
       const { dumpId, routine } = item.data
       // A recurring tile stays on the board by design, so only offer to clear one-off tiles.
       if (dumpId && !routine) {
@@ -76,6 +85,7 @@ function useItemActions(view: TodayView) {
         return
       }
       if (!(await planner.complete(item.id, true))) return
+      cheer(item)
       toast.success('Block done', { description: preview(item.data.title), action: undo(item) })
     },
 
@@ -336,7 +346,7 @@ function MinMetPrompt({ onAnswer, onCancel }: { onAnswer: (met: boolean) => void
 // ---- Next card ---------------------------------------------------------------------------
 
 /** The first open item, shown large. Blocks: Start; tasks: Done. Both: Skip. */
-export function NextCard({ view, onSkip }: { view: TodayView; onSkip: (item: Item) => void }) {
+export function NextCard({ view, onSkip, onEdit }: { view: TodayView; onSkip: (item: Item) => void; onEdit: (item: Item) => void }) {
   const actions = useItemActions(view)
   const item = view.next
   if (!item) return null
@@ -345,7 +355,7 @@ export function NextCard({ view, onSkip }: { view: TodayView; onSkip: (item: Ite
   const running = view.focus?.data.itemId === item.id
 
   return (
-    <section aria-labelledby="next-heading" className="animate-fade-up rounded-3xl border border-accent/25 bg-card p-5 shadow-sm sm:p-6">
+    <section aria-labelledby="next-heading" className="animate-fade-up rounded-3xl border border-accent/25 bg-card bg-linear-to-br from-accent-soft/70 via-card to-card p-5 shadow-md shadow-accent/10 sm:p-6">
       <div className="flex flex-wrap items-center gap-1.5">
         <h2 id="next-heading" className="mr-1 text-xs font-semibold tracking-wide text-accent uppercase">
           Next
@@ -354,6 +364,9 @@ export function NextCard({ view, onSkip }: { view: TodayView; onSkip: (item: Ite
           {isBlock ? `Block · ${data.minutes} min` : 'Task'}
         </span>
         <TagChips item={item} priority={item.data.dumpId ? view.metas.get(item.data.dumpId)?.priority : null} />
+        <Button variant="ghost" size="icon-sm" className="ml-auto pointer-coarse:size-10" onClick={() => onEdit(item)} aria-label={`Edit: ${preview(data.title, 60)}`} title="Edit, set priority or remove">
+          <Pencil aria-hidden />
+        </Button>
       </div>
 
       <p className="mt-3 text-xl leading-snug font-semibold tracking-tight break-words text-ink sm:text-2xl">{data.title}</p>
@@ -397,7 +410,7 @@ export function NextCard({ view, onSkip }: { view: TodayView; onSkip: (item: Ite
 
 // ---- Queue -----------------------------------------------------------------------------------
 
-export function QueueList({ view, onSkip }: { view: TodayView; onSkip: (item: Item) => void }) {
+export function QueueList({ view, onSkip, onEdit }: { view: TodayView; onSkip: (item: Item) => void; onEdit: (item: Item) => void }) {
   const planner = usePlanner()
   const actions = useItemActions(view)
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
@@ -485,6 +498,7 @@ export function QueueList({ view, onSkip }: { view: TodayView; onSkip: (item: It
                   }}
                   onCancelConfirm={() => setConfirmingId(null)}
                   onSkip={() => onSkip(item)}
+                  onEdit={() => onEdit(item)}
                 />
               ))}
             </ol>
@@ -530,9 +544,10 @@ interface QueueRowProps {
   onAnswer: (met: boolean) => void
   onCancelConfirm: () => void
   onSkip: () => void
+  onEdit: () => void
 }
 
-function QueueRow({ item, priority, isNext, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip }: QueueRowProps) {
+function QueueRow({ item, priority, isNext, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip, onEdit }: QueueRowProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const { data } = item
   const isBlock = data.type === 'block'
@@ -590,10 +605,17 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
         </button>
 
         <div className="min-w-0 flex-1 py-1.5">
-          <p className="line-clamp-2 text-[15px] leading-snug break-words text-ink">
-            {isNext && <span className="sr-only">Next: </span>}
-            {data.title}
-          </p>
+          <button
+            type="button"
+            onClick={onEdit}
+            className={cn('-mx-1 block max-w-full rounded-md px-1 text-left hover:bg-sunken', focusRing)}
+            aria-label={`Edit: ${title}`}
+          >
+            <span className="line-clamp-2 text-[15px] leading-snug break-words text-ink">
+              {isNext && <span className="sr-only">Next: </span>}
+              {data.title}
+            </span>
+          </button>
 
           <div className="mt-1 flex flex-wrap gap-x-1 gap-y-0">
             <InlineField label="First action" value={data.firstAction} placeholder="One physical first step" onSave={(v) => actions.setField(item, 'firstAction', v)} />
@@ -611,6 +633,9 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
                   {running ? 'Open' : 'Start'}
                 </Button>
               )}
+              <Button size="icon-sm" variant="ghost" onClick={onEdit} aria-label={`Edit or remove: ${title}`} title="Edit, set priority or remove" className="pointer-coarse:size-10">
+                <Pencil aria-hidden />
+              </Button>
               {!running && (
                 <Button size="sm" variant="ghost" onClick={onSkip} aria-label={`Skip: ${title}`} className="pointer-coarse:h-10">
                   <SkipForward aria-hidden />
