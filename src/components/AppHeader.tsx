@@ -1,9 +1,11 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router'
-import { Cloud, HardDrive, History, LayoutGrid, LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Cloud, Download, Flame, HardDrive, History, LayoutGrid, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth, useUser } from '@/auth/AuthProvider'
+import { backend } from '@/data/backend'
 import { errorMessage } from '@/data/errors'
+import { downloadExport } from '@/data/exportData'
 import { initialsOf } from '@/domain/user'
 import { cn } from '@/lib/cn'
 import { useToday } from '@/state/PlannerProvider'
@@ -23,6 +25,7 @@ export function AppHeader() {
             <span className="max-sm:sr-only">Dump</span>
           </NavLink>
           <TodayLink />
+          <HabitsLink />
           <NavLink to="/history" className={navClass}>
             <History aria-hidden />
             <span className="max-sm:sr-only">History</span>
@@ -65,6 +68,29 @@ function TodayLink() {
   )
 }
 
+/** "Habits" with a ring that fills as today's habits get done. */
+function HabitsLink() {
+  const { habitsDue, habitsDoneToday } = useToday()
+  const total = habitsDue.length
+  const left = total - habitsDoneToday
+  const title = total ? (left ? `${left} habit${left === 1 ? '' : 's'} left today` : 'All habits done today') : undefined
+  return (
+    <NavLink to="/habits" className={navClass} title={title}>
+      <Flame aria-hidden />
+      <span className="max-sm:sr-only">Habits</span>
+      {left > 0 && (
+        <span
+          aria-hidden
+          className="grid h-4 min-w-4 place-items-center rounded-full bg-emerald-700 px-1 text-[10px] leading-none font-semibold text-white tabular-nums max-sm:absolute max-sm:-top-0.5 max-sm:-right-0.5"
+        >
+          {left > 9 ? '9+' : left}
+        </span>
+      )}
+      {left > 0 && <span className="sr-only">, {left} left</span>}
+    </NavLink>
+  )
+}
+
 const themeOptions: Array<{ value: ThemePreference; label: string; icon: typeof Sun }> = [
   { value: 'light', label: 'Light', icon: Sun },
   { value: 'dark', label: 'Dark', icon: Moon },
@@ -98,6 +124,19 @@ function UserMenu() {
       document.removeEventListener('keydown', onKeyDown)
     }
   }, [open])
+
+  const [exporting, setExporting] = useState(false)
+  const exportData = async () => {
+    setExporting(true)
+    try {
+      await downloadExport(backend, user)
+      toast.success('Backup downloaded', { description: 'A JSON file with your tiles, history, habits and planner.' })
+    } catch (error) {
+      toast.error(`Couldn't build the backup. ${errorMessage(error)}`)
+    } finally {
+      setExporting(false)
+    }
+  }
 
   const signOut = async () => {
     setOpen(false)
@@ -171,6 +210,18 @@ function UserMenu() {
           </div>
 
           <div className="border-t border-line pt-2">
+            <button
+              type="button"
+              onClick={() => void exportData()}
+              disabled={exporting}
+              className={cn(
+                'flex w-full items-center gap-2.5 rounded-xl px-3 py-2.5 text-sm text-ink-muted transition hover:bg-sunken hover:text-ink disabled:opacity-60',
+                focusRing,
+              )}
+            >
+              <Download className="size-4" aria-hidden />
+              {exporting ? 'Preparing backup…' : 'Download my data'}
+            </button>
             <button
               type="button"
               onClick={() => void signOut()}

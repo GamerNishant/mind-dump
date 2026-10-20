@@ -19,6 +19,7 @@ import {
 import { toast } from 'sonner'
 import { Button, EmptyState, focusRing } from '@/components/ui'
 import { SetupCard } from '@/components/today/SetupCard'
+import { HabitButton } from '@/components/habits/HabitStackCard'
 import { HourLogStrip } from '@/components/today/HourLogStrip'
 import type { Dump } from '@/domain/dump'
 import {
@@ -282,6 +283,20 @@ function ShutdownScreen({ view }: { view: TodayView }) {
             />
             <span>Breakfast and lunch for tomorrow are sorted</span>
           </label>
+          {view.habitsDue.length > 0 && (
+            <div className="mt-3">
+              <p className="text-sm font-medium text-ink">
+                Habits today <span className="font-normal text-ink-muted tabular-nums">({view.habitsDoneToday} of {view.habitsDue.length})</span>
+              </p>
+              <ul className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+                {view.habitsDue.map((habit) => (
+                  <li key={habit.id}>
+                    <HabitButton habit={habit} today={view.today} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <div className="mt-3">
             <button
               type="button"

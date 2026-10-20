@@ -43,6 +43,7 @@ const meta = (dumpId: string, fields: Partial<TileMeta>): PlannerDoc<TileMeta> =
     defaultMinimum: '',
     skipCount: 0,
     carryCount: 0,
+    priority: null,
     ...fields,
   },
   createdAt: '2026-10-01T00:00:00Z',
@@ -77,7 +78,7 @@ describe('stableId', () => {
 })
 
 describe('queue caps', () => {
-  const settings = { blockCap: 2, taskCap: 2, dayStartHour: 3, rulesSeeded: true }
+  const settings = { blockCap: 2, taskCap: 2, dayStartHour: 3, rulesSeeded: true, otherTags: [] }
   it('counts open and done items, but not skipped ones or habits', () => {
     const items = [
       item('a', 'd', { type: 'block' }),

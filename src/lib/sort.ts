@@ -1,9 +1,11 @@
 import type { Dump } from '@/domain/dump'
+import { priorityRank, type Priority } from '@/domain/plan'
 
-export type SortMode = 'custom' | 'newest' | 'oldest' | 'az' | 'za' | 'shortest' | 'longest'
+export type SortMode = 'custom' | 'priority' | 'newest' | 'oldest' | 'az' | 'za' | 'shortest' | 'longest'
 
 export const SORT_OPTIONS: ReadonlyArray<{ value: SortMode; label: string }> = [
   { value: 'custom', label: 'My order' },
+  { value: 'priority', label: 'Priority (high first)' },
   { value: 'newest', label: 'Newest first' },
   { value: 'oldest', label: 'Oldest first (most pending)' },
   { value: 'az', label: 'A → Z' },
@@ -27,7 +29,7 @@ export const byPosition = (a: Dump, b: Dump): number =>
   a.position - b.position || time(a.createdAt) - time(b.createdAt) || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0)
 const text = (d: Dump) => d.content.trim()
 
-const comparators: Record<SortMode, (a: Dump, b: Dump) => number> = {
+const comparators: Record<Exclude<SortMode, 'priority'>, (a: Dump, b: Dump) => number> = {
   custom: byPosition,
   newest: (a, b) => time(b.createdAt) - time(a.createdAt) || byPosition(a, b),
   oldest: (a, b) => time(a.createdAt) - time(b.createdAt) || byPosition(a, b),
@@ -37,7 +39,12 @@ const comparators: Record<SortMode, (a: Dump, b: Dump) => number> = {
   longest: (a, b) => text(b).length - text(a).length || byPosition(a, b),
 }
 
-export function sortDumps(dumps: readonly Dump[], mode: SortMode): Dump[] {
+/** Tile priority lookup (priority lives in planner tile meta, not on the dump). */
+export type PriorityOf = (id: string) => Priority | null | undefined
+
+/** "Priority": high, medium, low, then unset; ties keep "My order". */
+export function sortDumps(dumps: readonly Dump[], mode: SortMode, priorityOf: PriorityOf = () => null): Dump[] {
+  if (mode === 'priority') return [...dumps].sort((a, b) => priorityRank(priorityOf(a.id)) - priorityRank(priorityOf(b.id)) || byPosition(a, b))
   return [...dumps].sort(comparators[mode])
 }
 

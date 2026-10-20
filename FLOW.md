@@ -39,7 +39,7 @@ flowchart TD
   P --> D["DumpsProvider key=user.id"]
   D --> PP["PlannerProvider: store, Planner, RolloverRunner"]
   PP --> H[AppHeader + LocalModeBanner + MorningLanding]
-  PP --> O["Outlet: / board, /today, /focus, /shutdown, /rules, /history"]
+  PP --> O["Outlet: / board, /today, /habits, /focus, /shutdown, /rules, /history"]
   Routes --> X["* → Navigate to /"]
 ```
 
@@ -292,7 +292,7 @@ The account menu (`UserMenu` in [src/components/AppHeader.tsx](src/components/Ap
 
 Other I/O:
 
-- **localStorage** keys: `minddump:theme`, `minddump:sort:<userId>`, `minddump:local-banner-dismissed`, and in local mode `minddump:local:users`, `minddump:local:session` and `minddump:local:dumps:<userId>`. supabase-js also stores its own session (`persistSession: true`); the key name is set by the library, not this code.
+- **localStorage** keys: `minddump:theme`, `minddump:sort:<userId>`, `minddump:local-banner-dismissed`, `minddump:hourlog-open`, `minddump:hourlog-view`, `minddump:habit-intro-hidden`, and in local mode `minddump:local:users`, `minddump:local:session` and `minddump:local:dumps:<userId>`. supabase-js also stores its own session (`persistSession: true`); the key name is set by the library, not this code.
 - **Network**: Supabase REST/Auth/Realtime at `VITE_SUPABASE_URL`, plus Google Fonts.
 - There is no other file I/O at runtime. In cloud mode dumps live only in the store's memory on the client; there is no offline cache.
 
@@ -348,11 +348,20 @@ Other I/O:
 | `ThemeProvider` | `matchMedia` `change` listener. |
 | `Modal` | Calls `dialog.close()` when `open` turns false. |
 
-### 6.3 Window close
+### 6.3 Download my data (backup)
+
+1. Account menu → **Download my data** → `UserMenu.exportData()` → `downloadExport(backend, user)` ([src/data/exportData.ts](src/data/exportData.ts)).
+2. `buildExport` reads straight from the backend, not from the stores:
+   - `dumps.listActive()`;
+   - `dumps.listDone()` in pages of 500 until `hasMore` is false;
+   - `planner.list({ kinds: ALL_KINDS, sinceDay: '0000-01-01' })`, with no 45-day cut-off. If the planner table is missing (cloud setup not done), it continues with `planner: []` and `plannerAvailable: false`.
+3. The JSON goes into a `Blob`, is downloaded as `mind-dump-backup-YYYY-MM-DD.json` through a temporary `<a download>`, and a toast confirms. Any error becomes `toast.error`.
+
+### 6.4 Window close
 
 There is no `beforeunload` handling. The session survives a reload (supabase-js `persistSession`, or the local session key). A write that is still in flight when the tab closes may never reach the server. In cloud mode, unsynced optimistic state is not kept anywhere.
 
-### 6.4 Build output
+### 6.5 Build output
 
 `npm run build` runs `tsc -b`, then `vite build` → `dist/` (with asset URLs prefixed by `VITE_BASE`). The GitHub Pages workflow also copies `dist/index.html` to `dist/404.html` before uploading. Hosts other than Pages use [vercel.json](vercel.json) or [public/_redirects](public/_redirects) for SPA rewrites.
 
@@ -487,3 +496,37 @@ The actions on this screen:
 - **Rollover writes:** each is tried once per load generation, so a failing write can't loop.
 - **Deleted or split tiles:** `BoardPage` and `EditDumpDialog` call `planner.retireDump(dumpId)`, which closes that tile's open items with the reason `deleted`.
 - **Time up while away from `/focus`:** `FocusAlarm` (always mounted in `AppLayout`) plays the chime, flashes the tab title, and shows a "Log it" toast that opens `/focus`.
+
+### 7.11 Habits (the habit stack)
+
+Code: [src/lib/habits.ts](src/lib/habits.ts) (pure rules), `Planner` habit methods in [src/state/planner.ts](src/state/planner.ts), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx), [HabitsPage.tsx](src/pages/HabitsPage.tsx).
+
+1. **Read.** `useToday()` calls `habitsOf(docs)`, which normalizes and sorts the `habit` documents, then filters them with `isDue(habit, today)`. It returns `habits`, `habitsDue` and `habitsDoneToday`. The header's `HabitsLink` badge, the Today header's "Habits n/m" stat, `HabitStackCard` and Shutdown all read these.
+2. **Add.** From the "Start a habit" card on Today, or the form on `/habits`: `planner.addHabit(name, days)` cleans the name (80 characters at most), puts it at the end of the stack and sets `startDay = today`. It is one `store.put` of an undated `habit` document.
+3. **Tap to log.** `HabitButton` (on Today and in Shutdown) or a day cell on `/habits` calls `planner.toggleHabit(id, day)`. This toggles `day` in `done` (`toggleDone`) and moves `startDay` back if the day is earlier. The write is optimistic, so the check animates at once; marking a habit done also vibrates. Tapping again undoes it.
+4. **Stats** are computed from `done` on every render: `currentStreak`, `bestStreak`, `consistency(habit, today, 30)`, `missedLast` (the "Never miss twice" nudge), and `habitCells` for the 7-day row and the 12-week grid.
+5. **Edit, reorder, delete.** `EditHabitDialog` calls `updateHabit` (name, days). The arrows call `moveHabit(id, ±1)` (`planMove` on `order`). Delete asks for confirmation, then calls `removeHabit`; the toast's Undo calls `restoreHabit(snapshot)`, which writes the same document back.
+6. **From a tile.** The edit dialog's **Make it a habit** saves the tile settings, calls `addHabit(titleFromDump(text))`, then `dumps.complete(tileId)`. The toast's Undo calls `removeHabit` and `dumps.restore(tile, 'original')`.
+
+### 7.12 Hour log: named Other hours and the Week view
+
+1. With hours selected, the chip bar offers the seven categories, every saved name in `settings.otherTags`, and **Other…**.
+2. **Other…** opens `OtherNamer`. On submit, `hourValue('other', text)` returns one of:
+   - `other:<name>`;
+   - a built-in category, if the text matches one ("sleep");
+   - plain `other`, if the text is blank.
+
+   A new name is saved with `planner.addOtherTag` (de-duplicated ignoring case by `mergeTags`). Then `planner.setHours(day, hours, value)` writes the `hour_log` document. A saved name's × calls `removeOtherTag`; hours already logged with that name keep it.
+3. Cells and summaries read values through `parseHour`, so unknown values count as Other. Named hours show their own initial and name, in Other's gray.
+4. The **Week** tab (`minddump:hourlog-view`) renders `HourWeekView`. `weekOf(today, offset)` gives Monday to Sunday, and `weekSummary(docs, days)` gives per-day segments in a fixed category order, plus totals, logged hours and active days. Totals for the week before supply the "vs week before" column. The previous-week button stops at about 6 weeks back, the 45-day load window.
+
+### 7.13 Priority
+
+1. The edit dialog's **Priority** segmented control is part of `MetaForm`. On Save, `metaPatch` includes `priority` only if it changed, and `planner.setTileMeta(dumpId, { priority })` writes it.
+2. `DumpGrid.infoOf` passes `meta.priority` to `DumpCard`, which shows a `PriorityChip` and gives High tiles a rose border.
+3. The board's **Priority (high first)** sort calls `sortDumps(active, 'priority', id => metas.get(id)?.priority)`: high, then medium, then low, then unset, with "My order" breaking ties. Dragging while this sort is on switches to "My order", the same as every non-custom sort.
+4. Today: `NextCard` and `QueueRow` look up the item's tile meta (`view.metas`) and show the chip. The "Pick from dump" list sorts by priority first, then Bookmark.
+
+### 7.14 Daily quote
+
+`useToday()` computes `quote: quoteOfDay(today)`. That is a deterministic index into the offline `QUOTES` list, so the quote changes at the planner day boundary (3 AM), not at midnight. `TodayHeader` renders it as a `<figure>` with a `<blockquote>` and a `<figcaption>`.

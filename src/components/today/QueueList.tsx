@@ -18,7 +18,8 @@ import { CSS } from '@dnd-kit/utilities'
 import { Check, ChevronDown, GripVertical, Play, Repeat, RotateCcw, SkipForward } from 'lucide-react'
 import { toast } from 'sonner'
 import { Button, focusRing } from '@/components/ui'
-import { BLOCK_MINUTES, CARRY_WARN, SKIP_REASON_LABEL, type TodayItem } from '@/domain/plan'
+import { BLOCK_MINUTES, CARRY_WARN, SKIP_REASON_LABEL, PRIORITY_LABEL, type Priority, type TodayItem } from '@/domain/plan'
+import { PRIORITY_CHIP, PriorityFlag } from '@/components/PriorityFlag'
 import { cn } from '@/lib/cn'
 import { hasRoomFor, type Doc } from '@/lib/plan'
 import { preview } from '@/lib/text'
@@ -238,16 +239,23 @@ function CarryChip({ item }: { item: Item }) {
   )
 }
 
-function TagChips({ item }: { item: Item }) {
+function TagChips({ item, priority }: { item: Item; priority?: Priority | null }) {
   return (
     <>
+      {priority && (
+        <span className={cn(chip, PRIORITY_CHIP[priority])} title={`${PRIORITY_LABEL[priority]} priority`}>
+          <PriorityFlag priority={priority} />
+          {PRIORITY_LABEL[priority]}
+          <span className="sr-only"> priority</span>
+        </span>
+      )}
       {item.data.routine && (
         <span className={cn(chip, 'bg-sunken text-ink-muted')}>
           <Repeat aria-hidden />
           Routine
         </span>
       )}
-      {item.data.habit && <span className={cn(chip, 'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300')}>Habit</span>}
+      {item.data.habit && <span className={cn(chip, 'bg-sunken text-ink-muted')} title="Doesn't count toward the cap">Light</span>}
       <CarryChip item={item} />
     </>
   )
@@ -345,7 +353,7 @@ export function NextCard({ view, onSkip }: { view: TodayView; onSkip: (item: Ite
         <span className={cn(chip, isBlock ? 'bg-accent-soft text-accent' : 'bg-sunken text-ink-muted')}>
           {isBlock ? `Block · ${data.minutes} min` : 'Task'}
         </span>
-        <TagChips item={item} />
+        <TagChips item={item} priority={item.data.dumpId ? view.metas.get(item.data.dumpId)?.priority : null} />
       </div>
 
       <p className="mt-3 text-xl leading-snug font-semibold tracking-tight break-words text-ink sm:text-2xl">{data.title}</p>
@@ -462,6 +470,7 @@ export function QueueList({ view, onSkip }: { view: TodayView; onSkip: (item: It
                 <QueueRow
                   key={item.id}
                   item={item}
+                  priority={item.data.dumpId ? view.metas.get(item.data.dumpId)?.priority : null}
                   isNext={index === 0}
                   running={view.focus?.data.itemId === item.id}
                   confirming={confirmingId === item.id}
@@ -512,6 +521,7 @@ type Actions = ReturnType<typeof useItemActions>
 
 interface QueueRowProps {
   item: Item
+  priority?: Priority | null
   isNext: boolean
   running: boolean
   confirming: boolean
@@ -522,7 +532,7 @@ interface QueueRowProps {
   onSkip: () => void
 }
 
-function QueueRow({ item, isNext, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip }: QueueRowProps) {
+function QueueRow({ item, priority, isNext, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip }: QueueRowProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const { data } = item
   const isBlock = data.type === 'block'
@@ -593,7 +603,7 @@ function QueueRow({ item, isNext, running, confirming, actions, onDone, onAnswer
           <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
             <TypeToggle item={item} onChange={(type) => void actions.setType(item, type)} />
             {isBlock && <MinutesPicker item={item} onChange={(m) => actions.setMinutes(item, m)} />}
-            <TagChips item={item} />
+            <TagChips item={item} priority={priority} />
             <div className="ml-auto flex items-center gap-1">
               {isBlock && (
                 <Button size="sm" variant={isNext ? 'primary' : 'secondary'} onClick={() => void actions.start(item)} className="pointer-coarse:h-10">

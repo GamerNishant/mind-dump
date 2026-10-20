@@ -17,6 +17,8 @@ import {
   settingsOf,
   tileMetaMap,
 } from '@/lib/plan'
+import { habitsOf, isDone, isDue } from '@/lib/habits'
+import { quoteOfDay } from '@/lib/quotes'
 import { useDumpsState, useDumpsStore } from './DumpsProvider'
 import { Planner } from './planner'
 import { PlannerStore, type PlannerState } from './plannerStore'
@@ -115,6 +117,8 @@ export function useToday() {
     const inToday = new Set(items.filter((i) => i.data.status !== 'skipped' && i.data.dumpId).map((i) => i.data.dumpId!))
     const yesterdayPlan = dayPlanOf(docs, addDays(today, -1), emptyDayPlan)
     const dots = floorDots(docs, today, emptyDayPlan)
+    const habits = habitsOf(docs)
+    const habitsDue = habits.filter((h) => isDue(h.data, today))
     return {
       status,
       now,
@@ -135,6 +139,11 @@ export function useToday() {
       /** Yesterday's Floor was missed (and the app was in use before that): "Never miss twice". */
       missedYesterday: dots[5].state === 'miss' && dots.slice(0, 5).some((d) => d.state === 'hit'),
       stale: planRollover({ docs, today, activeDumps: active }).stale,
+      /** Every habit in stack order, and the ones due today (shown on Today). */
+      habits,
+      habitsDue,
+      habitsDoneToday: habitsDue.filter((h) => isDone(h.data, today)).length,
+      quote: quoteOfDay(today),
     }
   }, [docs, status, active, now])
 }

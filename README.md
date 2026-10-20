@@ -11,11 +11,14 @@ Empty your head: every thought becomes a tile. Click a tile when it's handled, a
 - **History** (`/history`): cleared dumps grouped by day. You can restore, delete forever, or clear all.
 - **Drag & drop** reordering: mouse, touch (press and hold) and keyboard (focus the grip, then Space plus the arrow keys).
 - **Days pending** badge on every tile. The badge color warms with age: fresh → 3d → 7d → 14d+.
-- **Sorting**: My order, Newest, Oldest (most pending), A→Z, Z→A, Shortest, Longest. Dragging in a sorted view adopts that order as "My order". There is also a search box.
+- **Sorting**: My order, Priority, Newest, Oldest (most pending), A→Z, Z→A, Shortest, Longest. Dragging in a sorted view adopts that order as "My order". There is also a search box.
 - **Accounts**: email + password sign-up, sign-in, and password reset. Each user only ever sees their own data, enforced by Postgres row-level security.
 - **Live sync** across devices through Supabase Realtime. Light, dark and auto themes. Responsive from 320px phones to wide desktops.
 - Shortcuts: <kbd>n</kbd> or <kbd>/</kbd> focuses the composer; <kbd>Ctrl</kbd>+<kbd>Enter</kbd> splits a multi-line dump.
-- **Planner (Today)**: tap **+ Today** on a tile to queue it; the tile stays in the dump. Today is an ordered queue of **Blocks** (timed deep work with a first action and a minimum) and **Tasks**, with caps. **Start** opens a focus timer. **Skip** asks you to start for 2 minutes, shrink it, or skip with a reason and a destination. Repeating tiles add themselves each day and unfinished items carry over. A **Morning Check** and an evening **Shutdown** bracket the day. An hour log shows where the time went, and **Rules** holds your if-then plans.
+- **Planner (Today)**: tap **+ Today** on a tile to queue it; the tile stays in the dump. Today is an ordered queue of **Blocks** (timed deep work with a first action and a minimum) and **Tasks**, with caps. **Start** opens a focus timer. **Skip** asks you to start for 2 minutes, shrink it, or skip with a reason and a destination. Repeating tiles add themselves each day and unfinished items carry over. A **Morning Check** and an evening **Shutdown** bracket the day. An hour log shows where the time went, by day or by **week**; for "Other" hours you can say what they were. **Rules** holds your if-then plans, and a short quote greets you each day.
+- **Habits**: a habit stack for small daily things. They show highlighted on Today, one tap logs them, and the Habits page shows streaks, consistency and history.
+- **Priority**: mark tiles High, Medium or Low (in the edit dialog). They get a flag and can be sorted by priority.
+- **Backup**: **Download my data** in the account menu saves everything as a JSON file.
 
 Docs: [DESIGN.md](DESIGN.md) covers architecture and decisions; [FLOW.md](FLOW.md) traces the code from entry to exit.
 

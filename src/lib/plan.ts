@@ -4,7 +4,6 @@ import {
   KIND,
   type DayPlan,
   type FocusSession,
-  type HourCategory,
   type HourLog,
   type ItemType,
   type PlanSettings,
@@ -363,12 +362,6 @@ export function coveredHours(start: Date, end: Date, startHour: number): Array<{
     cursor.setTime(next.getTime())
   }
   return out
-}
-
-export function hourSummary(log: HourLog): Array<{ category: HourCategory; hours: number }> {
-  const counts = new Map<HourCategory, number>()
-  for (const c of Object.values(log.hours)) if (c) counts.set(c, (counts.get(c) ?? 0) + 1)
-  return [...counts].map(([category, hours]) => ({ category, hours })).sort((a, b) => b.hours - a.hours)
 }
 
 // ---- focus --------------------------------------------------------------------------------

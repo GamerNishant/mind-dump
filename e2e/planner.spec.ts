@@ -492,7 +492,7 @@ for (const theme of ['light', 'dark'] as const) {
     await page.getByRole('button', { name: 'Edit: Lunch: dal + rice' }).click()
     const edit = page.getByRole('dialog', { name: 'Edit dump' })
     await edit.getByRole('group', { name: 'Repeat preset' }).getByRole('button', { name: 'Daily' }).click()
-    await edit.getByLabel('Habit').check()
+    await edit.getByLabel('Light routine').check()
     await edit.getByLabel('Minimum').fill('Eat at the table')
     await clearToasts(page)
     await settle()

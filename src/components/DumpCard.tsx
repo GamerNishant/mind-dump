@@ -2,9 +2,11 @@ import type { KeyboardEventHandler, MouseEventHandler, Ref, TouchEventHandler } 
 import type { DraggableAttributes } from '@dnd-kit/core'
 import { Bookmark, CalendarCheck, CalendarPlus, Clock, GripVertical, Pencil, Repeat, Sun } from 'lucide-react'
 import type { Dump } from '@/domain/dump'
+import type { Priority } from '@/domain/plan'
 import { cn } from '@/lib/cn'
 import { ageTone, daysBetween, formatDate, pendingLabel, type AgeTone } from '@/lib/days'
 import { preview } from '@/lib/text'
+import { PriorityChip } from './PriorityFlag'
 
 const toneBadge: Record<AgeTone, string> = {
   fresh: 'bg-emerald-500/10 text-emerald-700 dark:bg-emerald-400/10 dark:text-emerald-300',
@@ -68,6 +70,8 @@ interface DumpCardProps {
   repeatTitle?: string
   /** The Bookmark (resume note); shown as a chip when non-empty. */
   bookmark?: string
+  /** Shown as a flag chip when set. */
+  priority?: Priority
   /** "+ Today" button. Omit to hide it (e.g. in the drag overlay). */
   onAddToday?: () => void
 }
@@ -90,6 +94,7 @@ export function DumpCard({
   repeatLabel,
   repeatTitle,
   bookmark,
+  priority,
   onAddToday,
 }: DumpCardProps) {
   const tone = ageTone(daysBetween(dump.createdAt, now))
@@ -103,7 +108,9 @@ export function DumpCard({
         'shadow-[0_1px_2px_rgb(0_0_0/0.04),0_1px_1px_rgb(0_0_0/0.02)] transition-[box-shadow,border-color,translate,opacity] duration-200',
         overlay
           ? 'cursor-grabbing border-accent/40 shadow-2xl ring-2 ring-accent/30 rotate-[1.5deg]'
-          : 'border-line hover:-translate-y-0.5 hover:border-line-strong hover:shadow-lg hover:shadow-black/5 dark:hover:shadow-black/30',
+          : priority === 'high'
+            ? 'border-rose-400/50 hover:-translate-y-0.5 hover:border-rose-400/80 hover:shadow-lg hover:shadow-black/5 dark:border-rose-400/35 dark:hover:shadow-black/30'
+            : 'border-line hover:-translate-y-0.5 hover:border-line-strong hover:shadow-lg hover:shadow-black/5 dark:hover:shadow-black/30',
         !overlay && (surface ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'),
         !overlay && !placeholder && !exiting && 'animate-tile-in',
         placeholder && 'border-dashed opacity-35 shadow-none',
@@ -131,6 +138,7 @@ export function DumpCard({
           onAddToday ? 'pr-[4.5rem]' : 'pr-8',
         )}
       >
+        {priority && <PriorityChip priority={priority} />}
         <PendingBadge createdAt={dump.createdAt} now={now} />
         {inToday && (
           <span className={cn(chip, 'bg-accent-soft text-accent')}>

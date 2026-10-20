@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Link } from 'react-router'
 import { ArrowRight, RefreshCw, Sunrise, Timer } from 'lucide-react'
+import { HabitStackCard } from '@/components/habits/HabitStackCard'
 import { AddItemForm } from '@/components/today/AddItemForm'
 import { HourLogStrip } from '@/components/today/HourLogStrip'
 import { MorningCheckCard } from '@/components/today/MorningCheckCard'
@@ -68,6 +69,7 @@ export function TodayPage() {
         <div className="mt-6 flex flex-col gap-6">
           <RestartCard view={view} />
           <MorningCheckCard view={view} />
+          <HabitStackCard view={view} />
 
           {empty ? (
             <EmptyState

@@ -1,13 +1,17 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react'
-import { ArrowDownToLine, ArrowUpToLine, Split, Trash2, X } from 'lucide-react'
+import { useEffect, useId, useRef, useState } from 'react'
+import { ArrowDownToLine, ArrowUpToLine, Flame, Split, Trash2, X } from 'lucide-react'
+import { useNavigate } from 'react-router'
 import { toast } from 'sonner'
 import { MAX_DUMP_LENGTH, type Dump } from '@/domain/dump'
-import { BLOCK_MINUTES, type ItemType, type TileMeta } from '@/domain/plan'
+import { BLOCK_MINUTES, PRIORITIES, PRIORITY_LABEL, type ItemType, type Priority, type TileMeta } from '@/domain/plan'
 import { cn } from '@/lib/cn'
 import { daysBetween, formatDate, pendingLabel } from '@/lib/days'
-import { splitLines } from '@/lib/text'
+import { splitLines, preview } from '@/lib/text'
+import { titleFromDump } from '@/lib/plan'
 import { useDumpsStore } from '@/state/DumpsProvider'
 import { usePlanner, usePlannerState } from '@/state/PlannerProvider'
+import { ALL_DAYS, DayToggles, sameDays, SegmentButton, Segmented, sortedDays, WEEKDAYS } from './DayPicker'
+import { PriorityFlag } from './PriorityFlag'
 import { Button, focusRing, Modal, TextField } from './ui'
 
 interface EditDumpDialogProps {
@@ -29,23 +33,8 @@ interface MetaForm {
   habit: boolean
   minimum: string
   bookmark: string
+  priority: Priority | null
 }
-
-const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6]
-const WEEKDAYS = [1, 2, 3, 4, 5]
-/** Monday-first display; values are Date#getDay numbers (0 = Sunday). */
-const DAY_TOGGLES = [
-  { value: 1, short: 'M', long: 'Monday' },
-  { value: 2, short: 'T', long: 'Tuesday' },
-  { value: 3, short: 'W', long: 'Wednesday' },
-  { value: 4, short: 'T', long: 'Thursday' },
-  { value: 5, short: 'F', long: 'Friday' },
-  { value: 6, short: 'S', long: 'Saturday' },
-  { value: 0, short: 'S', long: 'Sunday' },
-]
-
-const sortedDays = (days: readonly number[] | null | undefined) => [...new Set(days ?? [])].sort((a, b) => a - b)
-const sameDays = (a: readonly number[], b: readonly number[]) => a.length === b.length && a.every((d, i) => d === b[i])
 
 function formOf(meta: TileMeta): MetaForm {
   return {
@@ -55,6 +44,7 @@ function formOf(meta: TileMeta): MetaForm {
     habit: meta.habit,
     minimum: meta.defaultMinimum ?? '',
     bookmark: meta.resumeNote ?? '',
+    priority: meta.priority ?? null,
   }
 }
 
@@ -67,6 +57,7 @@ function metaPatch(initial: MetaForm, form: MetaForm): Partial<Omit<TileMeta, 'd
   if (initial.habit !== form.habit) patch.habit = form.habit
   if (initial.minimum.trim() !== form.minimum.trim()) patch.defaultMinimum = form.minimum.trim()
   if (initial.bookmark.trim() !== form.bookmark.trim()) patch.resumeNote = form.bookmark.trim()
+  if (initial.priority !== form.priority) patch.priority = form.priority
   return Object.keys(patch).length ? patch : null
 }
 
@@ -82,6 +73,7 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
   const initialForm = useRef<MetaForm | null>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const dumpId = dump?.id
+  const navigate = useNavigate()
 
   // Reset only when a different dump is opened (not when the same one re-renders).
   useEffect(() => {
@@ -136,6 +128,26 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
     commitMeta()
     onMove?.(dump, edge)
     onClose()
+  }
+
+  /** The tile becomes a habit in the habit stack and leaves the board (Undo puts both back). */
+  const makeHabit = async () => {
+    commitMeta()
+    const habitId = await planner.addHabit(titleFromDump(trimmed || dump.content))
+    if (!habitId) return
+    onClose()
+    const cleared = await dumps.complete(dump.id)
+    toast.success('Now a daily habit', {
+      description: preview(dump.content),
+      action: { label: 'Open Habits', onClick: () => void navigate('/habits') },
+      cancel: {
+        label: 'Undo',
+        onClick: () => {
+          void planner.removeHabit(habitId)
+          if (cleared) void dumps.restore(dump, 'original')
+        },
+      },
+    })
   }
 
   const split = async () => {
@@ -226,7 +238,7 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
         rows={5}
         className="block max-h-[50dvh] min-h-28 w-full resize-y rounded-xl border border-line bg-card px-3.5 py-3 text-base leading-relaxed text-ink focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 sm:text-[15px]"
       />
-      {(onMove || canSplit) && (
+      {(onMove || canSplit || plannerReady) && (
         <div className="mt-3 flex flex-wrap gap-2">
           {onMove && (
             <>
@@ -246,6 +258,12 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
               Split into lines
             </Button>
           )}
+          {plannerReady && (
+            <Button variant="secondary" size="sm" onClick={() => void makeHabit()} title="Track it in Habits with one tap a day">
+              <Flame aria-hidden />
+              Make it a habit
+            </Button>
+          )}
         </div>
       )}
 
@@ -263,11 +281,26 @@ export function EditDumpDialog({ dump, now, onClose, onSave, onDelete, onMove }:
 function PlanSettingsSection({ form, onChange }: { form: MetaForm; onChange: (patch: Partial<MetaForm>) => void }) {
   const id = useId()
   const repeatOff = form.repeat.length === 0
-  const toggleDay = (day: number) =>
-    onChange({ repeat: sortedDays(form.repeat.includes(day) ? form.repeat.filter((d) => d !== day) : [...form.repeat, day]) })
 
   return (
     <div className="mt-5 space-y-4 border-t border-line pt-4">
+      <fieldset>
+        <legend className="mb-2 text-sm font-medium text-ink">Priority</legend>
+        <Segmented label="Priority">
+          <SegmentButton pressed={form.priority === null} onClick={() => onChange({ priority: null })}>
+            None
+          </SegmentButton>
+          {PRIORITIES.map((p) => (
+            <SegmentButton key={p} pressed={form.priority === p} onClick={() => onChange({ priority: p })}>
+              <span className="inline-flex items-center gap-1">
+                <PriorityFlag priority={p} />
+                {PRIORITY_LABEL[p]}
+              </span>
+            </SegmentButton>
+          ))}
+        </Segmented>
+      </fieldset>
+
       <fieldset>
         <legend className="mb-2 text-sm font-medium text-ink">Repeat</legend>
         <div className="flex flex-wrap items-center gap-2">
@@ -283,27 +316,8 @@ function PlanSettingsSection({ form, onChange }: { form: MetaForm; onChange: (pa
             </SegmentButton>
           </Segmented>
         </div>
-        <div role="group" aria-label="Repeat days" className="mt-2 flex flex-wrap gap-1.5">
-          {DAY_TOGGLES.map((d) => {
-            const on = form.repeat.includes(d.value)
-            return (
-              <button
-                key={d.value}
-                type="button"
-                aria-pressed={on}
-                aria-label={d.long}
-                title={d.long}
-                onClick={() => toggleDay(d.value)}
-                className={cn(
-                  'grid size-9 place-items-center rounded-full text-sm font-medium transition',
-                  on ? 'bg-accent-solid text-accent-ink shadow-sm' : 'border border-line bg-card text-ink-muted hover:border-line-strong hover:text-ink',
-                  focusRing,
-                )}
-              >
-                {d.short}
-              </button>
-            )
-          })}
+        <div className="mt-2">
+          <DayToggles label="Repeat days" days={form.repeat} onChange={(repeat) => onChange({ repeat })} />
         </div>
         <p className="mt-2 text-xs text-ink-subtle">Repeating tiles add themselves to Today on these days.</p>
       </fieldset>
@@ -338,7 +352,7 @@ function PlanSettingsSection({ form, onChange }: { form: MetaForm; onChange: (pa
             className="mt-0.5 size-4 shrink-0 cursor-pointer accent-accent-solid"
           />
           <span className="text-sm text-ink">
-            Habit <span className="text-ink-muted">(doesn't count toward the cap: meals, snacks)</span>
+            Light routine <span className="text-ink-muted">(doesn't count toward the cap: meals, snacks)</span>
           </span>
         </label>
       </fieldset>
@@ -373,30 +387,5 @@ function PlanSettingsSection({ form, onChange }: { form: MetaForm; onChange: (pa
         }
       />
     </div>
-  )
-}
-
-function Segmented({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div role="group" aria-label={label} className="inline-flex gap-1 rounded-xl bg-sunken p-1">
-      {children}
-    </div>
-  )
-}
-
-function SegmentButton({ pressed, onClick, children }: { pressed: boolean; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={pressed}
-      onClick={onClick}
-      className={cn(
-        'h-9 rounded-lg px-3 text-xs font-medium whitespace-nowrap transition sm:h-8',
-        pressed ? 'bg-card text-ink shadow-sm ring-1 ring-line-strong' : 'text-ink-muted hover:text-ink',
-        focusRing,
-      )}
-    >
-      {children}
-    </button>
   )
 }

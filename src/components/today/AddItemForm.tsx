@@ -7,6 +7,8 @@ import type { ItemType } from '@/domain/plan'
 import { cn } from '@/lib/cn'
 import { hasRoomFor } from '@/lib/plan'
 import { matchesQuery } from '@/lib/sort'
+import { priorityRank } from '@/domain/plan'
+import { PriorityChip } from '@/components/PriorityFlag'
 import { preview } from '@/lib/text'
 import { useDumpsState, useDumpsStore } from '@/state/DumpsProvider'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
@@ -141,8 +143,12 @@ function DumpPicker({
   const candidates = useMemo(() => {
     const list = active.filter((d) => !view.inToday.has(d.id) && matchesQuery(d, query))
     const hasMark = (d: Dump) => (view.metas.get(d.id)?.resumeNote.trim() ? 0 : 1)
-    // Stable sort: Bookmarked tiles first, otherwise board order.
-    return list.map((d, i) => ({ d, i })).sort((a, b) => hasMark(a.d) - hasMark(b.d) || a.i - b.i).map(({ d }) => d)
+    const rank = (d: Dump) => priorityRank(view.metas.get(d.id)?.priority)
+    // Stable sort: higher priority first, then Bookmarked tiles, otherwise board order.
+    return list
+      .map((d, i) => ({ d, i }))
+      .sort((a, b) => rank(a.d) - rank(b.d) || hasMark(a.d) - hasMark(b.d) || a.i - b.i)
+      .map(({ d }) => d)
   }, [active, view.inToday, view.metas, query])
 
   const pick = async (dump: Dump) => {
@@ -208,6 +214,7 @@ function DumpPicker({
                   )}
                 >
                   <span className="min-w-0 flex-1">
+                    {meta?.priority && <PriorityChip priority={meta.priority} className="mb-1" />}
                     <span className="line-clamp-2 text-[15px] leading-snug break-words text-ink">{dump.content}</span>
                     {note && (
                       <span className="mt-1 flex items-center gap-1 text-xs text-accent">

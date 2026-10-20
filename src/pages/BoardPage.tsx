@@ -47,7 +47,7 @@ export function BoardPage() {
   const editDumpId = (location.state as { editDumpId?: unknown } | null)?.editDumpId
 
   const searching = query.trim() !== ''
-  const sorted = useMemo(() => sortDumps(active, sort), [active, sort])
+  const sorted = useMemo(() => sortDumps(active, sort, (id) => metas.get(id)?.priority), [active, sort, metas])
   const visible = useMemo(() => sorted.filter((d) => matchesQuery(d, query)), [sorted, query])
   const visibleRef = useRef(visible)
   visibleRef.current = visible

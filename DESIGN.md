@@ -23,6 +23,11 @@ Mind Dump is a single-page web app for emptying your head and then doing the rig
 | Keyboard shortcuts: `n` or `/` focuses the composer | [src/pages/BoardPage.tsx](src/pages/BoardPage.tsx) |
 | Installable web app manifest | [public/manifest.webmanifest](public/manifest.webmanifest) |
 | **Planner**: Today queue, "+ Today" on tiles, routines, focus blocks, Skip sheet, Morning Check, Shutdown, hour log, rules (see §8) | [src/pages/TodayPage.tsx](src/pages/TodayPage.tsx), [src/components/today/](src/components/today/), [src/state/planner.ts](src/state/planner.ts) |
+| **Priority** (High / Medium / Low) on tiles: a flag chip, a "Priority" sort, shown in Today and the dump picker (see §8.5) | [EditDumpDialog.tsx](src/components/EditDumpDialog.tsx), [PriorityFlag.tsx](src/components/PriorityFlag.tsx), [src/lib/sort.ts](src/lib/sort.ts) |
+| **Habit stack**: daily habits with one-tap logging, streaks and consistency, shown on Today and in Shutdown (see §8.5) | [src/pages/HabitsPage.tsx](src/pages/HabitsPage.tsx), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx), [src/lib/habits.ts](src/lib/habits.ts) |
+| **Hour log Week view** and **named "Other" hours** (see §8.5) | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx), [HourWeekView.tsx](src/components/today/HourWeekView.tsx), [src/lib/hours.ts](src/lib/hours.ts) |
+| **Daily quote** on Today | [src/lib/quotes.ts](src/lib/quotes.ts), [TodayHeader.tsx](src/components/today/TodayHeader.tsx) |
+| **Download my data**: a JSON backup of everything, from the account menu | [src/data/exportData.ts](src/data/exportData.ts), [AppHeader.tsx](src/components/AppHeader.tsx) |
 
 ## 2. Tech stack
 
@@ -31,7 +36,7 @@ Mind Dump is a single-page web app for emptying your head and then doing the rig
 | **React 19** + **TypeScript** (strict) | UI | Uses `useSyncExternalStore` for the store. Strict TS (`noUnusedLocals` and similar) catches mistakes at build time. |
 | **Vite 8** | Dev server and bundler | Fast HMR. `base` comes from `VITE_BASE`, so one build can target a sub-path host such as GitHub Pages. |
 | **Tailwind CSS v4** (`@tailwindcss/vite`) | Styling | Utility classes plus semantic colour tokens (`bg-card`, `text-ink`) defined once in [src/index.css](src/index.css) and switched per theme. |
-| **react-router v7** | Routing (`/`, `/history`, `/login`, `/signup`, `/forgot-password`, `/reset-password`) | Declarative route guards, and `basename` for sub-path deploys. |
+| **react-router v7** | Routing (`/`, `/today`, `/habits`, `/focus`, `/shutdown`, `/rules`, `/history`, `/login`, `/signup`, `/forgot-password`, `/reset-password`) | Declarative route guards, and `basename` for sub-path deploys. |
 | **@dnd-kit** (core, sortable, utilities) | Drag reorder | Accessible: keyboard sensor, screen-reader announcements, touch sensor with long-press. |
 | **@supabase/supabase-js** | Auth, Postgres, Realtime | Free hosted backend. Row-level security lets the anon key be public. |
 | **sonner** | Toasts (errors, Undo, confirmations) | Toasts with action buttons; theme-aware. |
@@ -50,7 +55,8 @@ The code is layered, and dependencies point one way: UI (`App`, `pages/`, `compo
 src/
   main.tsx, App.tsx   entry, providers, routes and guards
   pages/              screens: BoardPage, HistoryPage, AuthPages
-  components/         presentational and interactive pieces (DumpGrid, DumpCard, Composer, dialogs, ui kit)
+  components/         presentational and interactive pieces (DumpGrid, DumpCard, Composer, dialogs, ui kit,
+                      DayPicker, PriorityFlag); today/ for the planner, habits/ for the habit stack
   state/              DumpsStore (client source of truth) + React binding (DumpsProvider)
   auth/               AuthProvider: current user, ready flag, recovery flag
   theme/              ThemeProvider: light/dark/system preference
@@ -121,6 +127,7 @@ interface AppUser { id: string; email: string; displayName: string }
 | Theme preference | `minddump:theme` in localStorage (both modes) | same |
 | Sort mode | `minddump:sort:<userId>` in localStorage (per device, per user) | same |
 | Local-mode banner dismissed | n/a | `minddump:local-banner-dismissed` |
+| Hour log open, its Day/Week tab, "Start a habit" card hidden | `minddump:hourlog-open`, `minddump:hourlog-view`, `minddump:habit-intro-hidden` (per device) | same |
 
 ### Database ([supabase/migrations/20261017000000_init.sql](supabase/migrations/20261017000000_init.sql))
 
@@ -242,9 +249,11 @@ The app is meant to take under 2 minutes in the morning and under 10 at night.
 | **Skip sheet** | Start, Shrink, Say: "Do just 2 minutes", "Shrink to 10 min", or skip with a reason and a destination (later today / tomorrow / back to dump). Shows the matching if-then rules. | [SkipSheet.tsx](src/components/today/SkipSheet.tsx) |
 | **Focus** (`/focus`) | Countdown for the running block. It is wall-clock based, survives reloads and syncs across devices. Controls: pause, +10, end, and "Park a thought" (creates a tile). The end dialog asks "minimum met?" and "where did you stop?". That answer is saved as the tile's **Bookmark** and becomes the next first action. Study hours fill in automatically. | [FocusPage.tsx](src/pages/FocusPage.tsx) |
 | **Shutdown** (`/shutdown`) | A 10-minute screen. Resolve every open item, build tomorrow's queue, set Block 1's first action and minimum, tick the food check, then press "Shutdown complete". This records blocks done and the Floor. | [ShutdownPage.tsx](src/pages/ShutdownPage.tsx) |
-| **Repeat** in the edit dialog | Off / Daily / Weekdays / chosen days, plus type, minutes, habit (doesn't count toward caps), minimum and Bookmark. Also "Split into lines". | [EditDumpDialog.tsx](src/components/EditDumpDialog.tsx) |
+| **Repeat** in the edit dialog | Priority, then Off / Daily / Weekdays / chosen days, plus type, minutes, Light routine (doesn't count toward caps), minimum and Bookmark. Also "Split into lines" and "Make it a habit". | [EditDumpDialog.tsx](src/components/EditDumpDialog.tsx) |
 | **Rules** (`/rules`) | If-then plans, seeded with 15 starters and editable. Plan settings: block cap (the Ramp, 1–4), task cap, day start hour. | [RulesPage.tsx](src/pages/RulesPage.tsx) |
-| **Hour log** | "Where did the time go?": tap hours and mark a category (Study, Phone, Sleep, Food, Build, Chores, Leisure, Other). | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx) |
+| **Hour log** | "Where did the time go?": tap hours and mark a category (Study, Phone, Sleep, Food, Build, Chores, Leisure), or **Other…**, which asks what it was ("Gym") and keeps the name as a quick pick. A **Week** tab shows where the hours went, Monday to Sunday. | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx), [HourWeekView.tsx](src/components/today/HourWeekView.tsx) |
+| **Habits** (`/habits`, plus a card on Today) | The habit stack: small daily things that aren't tasks. One tap logs today. Shows the streak, the best streak and a 30-day consistency rate. Tap any of the last 7 days to fix it; a 12-week history grid. Due habits show highlighted near the top of Today and in Shutdown's checks. | [HabitsPage.tsx](src/pages/HabitsPage.tsx), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx) |
+| **Daily quote** | A short quote at the top of Today, one per planner day. | [TodayHeader.tsx](src/components/today/TodayHeader.tsx), [lib/quotes.ts](src/lib/quotes.ts) |
 | Morning landing | Before noon, the first visit to `/` in a browser session opens `/today`. | `MorningLanding` in [App.tsx](src/App.tsx) |
 
 ### 8.2 Data model: one generic document table
@@ -264,12 +273,13 @@ Why one table: the owner can't easily run a migration every time a feature chang
 | `kind` | `day` | id | `data` ([src/domain/plan.ts](src/domain/plan.ts)) |
 |---|---|---|---|
 | `today_item` | planned day | random; routine instances use `stableId('today_item','routine',dumpId,day)` (dump ids are unique per user) | `TodayItem`: dumpId, title, type block/task, minutes, firstAction, minimum, order, status open/done/skipped, minMet, skips[], carriedFrom, carryCount, routine, habit, doneAt |
-| `tile_meta` | null | **= the dump's id** | `TileMeta`: repeat weekdays, defaultType/Minutes/Minimum, habit, resumeNote (Bookmark), skipCount, carryCount |
+| `tile_meta` | null | **= the dump's id** | `TileMeta`: repeat weekdays, defaultType/Minutes/Minimum, habit (labelled "Light routine": doesn't count toward the cap), resumeNote (Bookmark), skipCount, carryCount, **priority** (`high`/`medium`/`low`/null) |
 | `focus_session` | day | random | `FocusSession`: itemId, plannedMin, startedAt, pausedAt/pausedMs, endedAt, minMet, stoppedAt, starter |
-| `hour_log` | day | `stableId('hour_log',userId,day)` | `{ hours: { "4": "study", ... } }` |
+| `hour_log` | day | `stableId('hour_log',userId,day)` | `{ hours: { "4": "study", "18": "other:Gym", ... } }`: a category, or `other:<name>` |
 | `day_plan` | day | `stableId('day_plan',userId,day)` | `DayPlan`: morningCheckAt, block1, shutdownAt, blocksDone, floorMet, foodSorted, tomorrowFirst, restartAt |
 | `rule` | null | random; the 15 starter rules use `stableId('rule','seed',userId,i)` | `Rule`: ifText, thenText, reason, active, order |
-| `settings` | null | `stableId('settings',userId)` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded |
+| `settings` | null | `stableId('settings',userId)` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded, otherTags (saved names for Other hours) |
+| `habit` | null | random | `Habit`: name, days (weekdays it's due), done (planner days it was logged, sorted), order, startDay |
 
 ### 8.3 Architecture
 
@@ -316,7 +326,38 @@ Why one table: the owner can't easily run a migration every time a feature chang
 10. **Tiles that disappear.** Deleting a tile, or splitting it into lines, calls `planner.retireDump`. Its open items then close with the reason "Tile removed".
 11. **Cloud mode needs a one-time setup.** If the table is missing, Today shows a **SetupCard** with the SQL, a copy button and a link to the project's SQL editor.
 
-### 8.5 How to extend the planner
+### 8.5 Habits, priority, named Other hours, quote, backup
+
+All of these were added without any SQL: they are a new `kind` (`habit`) and new fields on existing documents in `planner_docs`.
+
+- **Habits are not Today items.** A Today item ends Done or Skipped; a habit is just yes or no per day. So habits skip the queue, the caps and the rollover. Each habit is **one undated document** whose `done` array lists the days it was logged. This has three benefits:
+  - streaks work over any span, even though dated documents only load for 45 days;
+  - each tap is one write;
+  - there is nothing to roll over at 3 AM.
+
+  A habit document stays far under the 32 KB cap, which allows about 2,400 logged days.
+- **Streak rules** ([lib/habits.ts](src/lib/habits.ts), unit-tested):
+  - A streak counts done days going back from today. Days the habit isn't due are skipped over.
+  - **Today not being done yet never breaks a streak.**
+  - Consistency is done ÷ due over the last 30 days, counted from the day the habit was added. Logging a day before that moves the start back.
+  - If the last due day was missed, the habit shows "Never miss twice" (the same rule as the Floor).
+
+  These follow common habit-app practice: a one-tap check-in, a visible row of days, a forgiving streak, and backfill limited to the last 7 days.
+- **"Make it a habit"** in a tile's edit dialog creates a habit from the tile's first line and clears the tile. The toast's Undo reverses both.
+- **The older `habit` flag on tiles** (meals and snacks that don't count toward the cap) is now labelled **Light routine**, so it isn't confused with the habit stack. The stored field name is unchanged.
+- **Priority lives in `tile_meta`**, not in `public.dumps`, so it needed no migration. The trade-off: priority isn't available until the planner has loaded, and sorting by it happens on the client (`sortDumps(dumps, 'priority', priorityOf)`).
+- **Named Other hours** are stored as `other:<name>` and **roll up under Other** in every summary, with the names listed as a breakdown. A name that matches a built-in category (for example "sleep") becomes that category. This keeps the chart at 8 colours however many names are added; a 9th colour would have to be generated, and couldn't be checked for colour-blind safety.
+- **Category colours** were changed so they pass the dataviz palette validator's normal-vision check: Food is now yellow-700, Build purple-700 and Leisure orange-700. The closest pair for colour-blind readers (Study and Phone) is in the ΔE 6–8 band. That is allowed because every cell, chip and bar also shows the category's initial or name.
+- **Week view** ([HourWeekView.tsx](src/components/today/HourWeekView.tsx)):
+  - one stacked bar per day, on a fixed 24-hour scale so days compare honestly;
+  - 2px gaps between segments, and a native tooltip on each one;
+  - a real `<table>` of totals, shares and the change from the week before.
+
+  You can step back about 6 weeks, which is the planner's 45-day load window.
+- **Quotes** are a fixed offline list ([lib/quotes.ts](src/lib/quotes.ts)), and `quoteOfDay(day)` picks one per planner day, so nothing is fetched. Uncertain attributions are marked "(attributed)" or "Unknown".
+- **The backup** ([data/exportData.ts](src/data/exportData.ts)) reads straight from the backend rather than the stores. It therefore includes all history and every planner document, with no date cut-off.
+
+### 8.6 How to extend the planner
 
 1. Add a new `kind` to `KIND`, and its data type, in [domain/plan.ts](src/domain/plan.ts).
 2. Add pure helpers to [lib/plan.ts](src/lib/plan.ts), with tests.

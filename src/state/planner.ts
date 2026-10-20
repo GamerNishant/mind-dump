@@ -3,14 +3,17 @@ import {
   DEFAULT_SETTINGS,
   defaultTileMeta,
   emptyDayPlan,
+  EVERY_DAY,
   KIND,
+  MAX_HABIT_NAME,
   SEED_RULES,
   SHRUNK_MINUTES,
   STARTER_MINUTES,
   type Block1Result,
   type DayPlan,
   type FocusSession,
-  type HourCategory,
+  type Habit,
+  type HourValue,
   type PlanSettings,
   type Rule,
   type SkipReason,
@@ -46,7 +49,9 @@ import {
   blocksDone,
   type Doc,
 } from '@/lib/plan'
-import { planMove } from '@/lib/position'
+import { habitsOf, normalizeHabit, toggleDone } from '@/lib/habits'
+import { cleanTag, mergeTags } from '@/lib/hours'
+import { planMove, POSITION_STEP } from '@/lib/position'
 import type { DumpsStore } from './dumpsStore'
 import type { PlannerStore } from './plannerStore'
 
@@ -342,7 +347,7 @@ export class Planner {
 
   // ---- Hour log --------------------------------------------------------------------------
 
-  setHours(day: string, hours: number[], category: HourCategory | null, opts: { onlyEmpty?: boolean } = {}): Promise<boolean> {
+  setHours(day: string, hours: number[], category: HourValue | null, opts: { onlyEmpty?: boolean } = {}): Promise<boolean> {
     const log = hourLogOf(this.docs, day)
     const next = { ...log.hours }
     let changed = false
@@ -360,6 +365,99 @@ export class Planner {
     if (!changed) return Promise.resolve(true)
     const id = singleton(this.docs, KIND.hourLog, day)?.id ?? hourLogId(this.userId, day)
     return this.store.put({ id, kind: KIND.hourLog, day, data: { hours: next } }, "Couldn't save the hour log")
+  }
+
+  /** Remember a name for "Other" hours so it is offered next time. */
+  addOtherTag(tag: string): Promise<boolean> {
+    const current = this.settings().otherTags ?? []
+    const next = mergeTags(current, [tag])
+    if (next.length === current.length) return Promise.resolve(true)
+    return this.updateSettings({ otherTags: next })
+  }
+
+  /** Stop offering a name. Hours already logged with it keep their name. */
+  removeOtherTag(tag: string): Promise<boolean> {
+    const key = cleanTag(tag).toLowerCase()
+    return this.updateSettings({ otherTags: (this.settings().otherTags ?? []).filter((t) => t.toLowerCase() !== key) })
+  }
+
+  // ---- Habits (the habit stack) ----------------------------------------------------------
+
+  habits(): Array<Doc<Habit>> {
+    return habitsOf(this.docs)
+  }
+
+  private habit(id: string): Doc<Habit> | null {
+    const doc = this.docs.get(id)
+    return doc?.kind === KIND.habit ? { ...(doc as Doc<Habit>), data: normalizeHabit(doc.data as Partial<Habit>) } : null
+  }
+
+  private putHabit(id: string, data: Habit, error?: string) {
+    return this.store.put({ id, kind: KIND.habit, day: null, data }, error)
+  }
+
+  /** Add a habit at the bottom of the stack. Resolves to its id, or null on failure. */
+  async addHabit(name: string, days: number[] = EVERY_DAY): Promise<string | null> {
+    const clean = name.replace(/\s+/g, ' ').trim().slice(0, MAX_HABIT_NAME)
+    if (!clean) return null
+    const habits = this.habits()
+    const id = newId()
+    const order = habits.length ? Math.max(...habits.map((h) => h.data.order)) + POSITION_STEP : 0
+    const data: Habit = { name: clean, days: days.length ? [...days].sort() : [...EVERY_DAY], done: [], order, startDay: this.today() }
+    return (await this.putHabit(id, data, "Couldn't add the habit")) ? id : null
+  }
+
+  /** One tap: done ⇄ not done for `day` (today by default). Resolves to the new state, or null on failure. */
+  async toggleHabit(id: string, day = this.today()): Promise<boolean | null> {
+    const doc = this.habit(id)
+    if (!doc) return null
+    const done = toggleDone(doc.data, day)
+    // Logging a day before it was added moves its start back, so that day counts.
+    const startDay = day < doc.data.startDay ? day : doc.data.startDay
+    const ok = await this.putHabit(id, { ...doc.data, done, startDay }, "Couldn't log the habit")
+    return ok ? done.includes(day) : null
+  }
+
+  updateHabit(id: string, patch: Partial<Pick<Habit, 'name' | 'days'>>): Promise<boolean> {
+    const doc = this.habit(id)
+    if (!doc) return Promise.resolve(false)
+    const name = patch.name === undefined ? doc.data.name : patch.name.replace(/\s+/g, ' ').trim().slice(0, MAX_HABIT_NAME)
+    if (!name) return Promise.resolve(false)
+    const days = patch.days && patch.days.length ? [...patch.days].sort() : doc.data.days
+    return this.putHabit(id, { ...doc.data, name, days }, "Couldn't save the habit")
+  }
+
+  /** Move a habit one place up or down the stack. */
+  moveHabit(id: string, direction: -1 | 1): Promise<boolean> {
+    const list = this.habits()
+    const index = list.findIndex((h) => h.id === id)
+    const target = index + direction
+    if (index < 0 || target < 0 || target >= list.length) return Promise.resolve(false)
+    const ids = list.map((h) => h.id)
+    ;[ids[index], ids[target]] = [ids[target], ids[index]]
+    const updates = planMove(
+      ids.map((hid) => {
+        const h = list.find((x) => x.id === hid)!
+        return { id: hid, position: h.data.order }
+      }),
+      target,
+    )
+    return this.store.put(
+      updates.map((u) => {
+        const h = list.find((x) => x.id === u.id)!
+        return { id: h.id, kind: KIND.habit, day: null, data: { ...h.data, order: u.position } }
+      }),
+      "Couldn't reorder habits",
+    )
+  }
+
+  removeHabit(id: string): Promise<boolean> {
+    return this.store.remove(id, "Couldn't delete the habit")
+  }
+
+  /** Undo for a delete: put the same document back. */
+  restoreHabit(doc: Doc<Habit>): Promise<boolean> {
+    return this.putHabit(doc.id, doc.data, "Couldn't restore the habit")
   }
 
   // ---- Day plan: Morning Check, Shutdown, Restart -------------------------------------------
@@ -475,7 +573,7 @@ export class Planner {
   }
 
   setTileMeta(dumpId: string, patch: Partial<Omit<TileMeta, 'dumpId'>>): Promise<boolean> {
-    return this.store.put(this.metaDoc({ ...this.meta(dumpId), ...patch }), "Couldn't save the repeat setting")
+    return this.store.put(this.metaDoc({ ...this.meta(dumpId), ...patch }), "Couldn't save the tile settings")
   }
 
   // ---- Rules + settings ----------------------------------------------------------------------

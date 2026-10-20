@@ -17,7 +17,7 @@ import {
 import { arrayMove, rectSortingStrategy, SortableContext, sortableKeyboardCoordinates, useSortable } from '@dnd-kit/sortable'
 import { CSS } from '@dnd-kit/utilities'
 import type { Dump } from '@/domain/dump'
-import type { RepeatDays, TileMeta } from '@/domain/plan'
+import type { Priority, RepeatDays, TileMeta } from '@/domain/plan'
 import { preview } from '@/lib/text'
 import { DumpCard } from './DumpCard'
 
@@ -96,6 +96,7 @@ export function DumpGrid({
       repeatLabel: repeat?.label,
       repeatTitle: repeat?.title,
       bookmark: meta?.resumeNote?.trim() || undefined,
+      priority: meta?.priority ?? undefined,
     }
   }
 
@@ -189,6 +190,7 @@ interface SortableTileProps {
   repeatLabel?: string
   repeatTitle?: string
   bookmark?: string
+  priority?: Priority
 }
 
 const SortableTile = memo(function SortableTile({
@@ -203,6 +205,7 @@ const SortableTile = memo(function SortableTile({
   repeatLabel,
   repeatTitle,
   bookmark,
+  priority,
 }: SortableTileProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({
     id: dump.id,
@@ -246,6 +249,7 @@ const SortableTile = memo(function SortableTile({
         repeatLabel={repeatLabel}
         repeatTitle={repeatTitle}
         bookmark={bookmark}
+        priority={priority}
       />
     </li>
   )

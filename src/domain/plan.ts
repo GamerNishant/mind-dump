@@ -14,6 +14,7 @@ export const KIND = {
   dayPlan: 'day_plan',
   rule: 'rule',
   settings: 'settings',
+  habit: 'habit',
 } as const
 
 export const ALL_KINDS: readonly string[] = Object.values(KIND)
@@ -93,7 +94,19 @@ export interface TileMeta {
   defaultMinimum: string
   skipCount: number
   carryCount: number
+  /** How much the tile matters; null = not set. */
+  priority: Priority | null
 }
+
+export const PRIORITIES = ['high', 'medium', 'low'] as const
+export type Priority = (typeof PRIORITIES)[number]
+
+export const PRIORITY_LABEL: Record<Priority, string> = { high: 'High', medium: 'Medium', low: 'Low' }
+
+/** Sort rank: high first, unset last. */
+export const priorityRank = (p: Priority | null | undefined) => (p === 'high' ? 0 : p === 'medium' ? 1 : p === 'low' ? 2 : 3)
+
+export const isPriority = (v: unknown): v is Priority => PRIORITIES.includes(v as Priority)
 
 export interface FocusSession {
   itemId: string | null
@@ -127,10 +140,36 @@ export const HOUR_CATEGORY_LABEL: Record<HourCategory, string> = {
   other: 'Other',
 }
 
+/**
+ * What an hour was spent on: a category, or `other:<tag>` for an "Other" hour the user named
+ * ("other:Gym"). Unknown values read as plain Other (see src/lib/hours.ts).
+ */
+export type HourValue = HourCategory | `other:${string}`
+
 /** One per day. Keys are clock hours "0"…"23". */
 export interface HourLog {
-  hours: Partial<Record<string, HourCategory>>
+  hours: Partial<Record<string, HourValue>>
 }
+
+export const MAX_TAG_LENGTH = 24
+
+/**
+ * A daily habit (habit stack): not a task, just something to do on its due days. One tap logs
+ * it. `done` holds the planner days it was done, so streaks need no extra documents.
+ */
+export interface Habit {
+  name: string
+  /** Weekdays it is due (Date#getDay); all 7 = daily. */
+  days: number[]
+  /** Planner days (YYYY-MM-DD) it was done, ascending. */
+  done: string[]
+  order: number
+  /** Planner day it was added; days before it don't count against consistency. */
+  startDay: string
+}
+
+export const MAX_HABIT_NAME = 80
+export const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
 
 export type Block1Result = 'yes' | 'partly' | 'no'
 
@@ -163,9 +202,11 @@ export interface PlanSettings {
   /** Hour (local) at which a new planner day starts; late nights belong to the previous day. */
   dayStartHour: number
   rulesSeeded: boolean
+  /** Names the user gave to "Other" hours, offered as quick picks next time. */
+  otherTags: string[]
 }
 
-export const DEFAULT_SETTINGS: PlanSettings = { blockCap: 2, taskCap: 5, dayStartHour: 3, rulesSeeded: false }
+export const DEFAULT_SETTINGS: PlanSettings = { blockCap: 2, taskCap: 5, dayStartHour: 3, rulesSeeded: false, otherTags: [] }
 
 export const BLOCK_MINUTES = [25, 50, 90] as const
 export const DEFAULT_BLOCK_MINUTES = 50
@@ -216,4 +257,5 @@ export const defaultTileMeta = (dumpId: string): TileMeta => ({
   defaultMinimum: '',
   skipCount: 0,
   carryCount: 0,
+  priority: null,
 })

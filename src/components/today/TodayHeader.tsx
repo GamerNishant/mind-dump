@@ -1,5 +1,5 @@
 import { Link } from 'react-router'
-import { Check, ListChecks, Moon } from 'lucide-react'
+import { Check, ListChecks, Moon, Quote } from 'lucide-react'
 import { buttonClass } from '@/components/ui'
 import { cn } from '@/lib/cn'
 import { blocksDone, dateOfDay, type DotState } from '@/lib/plan'
@@ -9,7 +9,7 @@ const DOT_LABEL: Record<DotState, string> = { hit: 'Floor hit', miss: 'missed', 
 
 /** "Today" title, Floor counters and dots, Never-miss-twice line, Shutdown and Rules links. */
 export function TodayHeader({ view }: { view: TodayView }) {
-  const { items, settings, plan, dots, now, today } = view
+  const { items, settings, plan, dots, now, today, quote, habitsDue, habitsDoneToday } = view
   const blocks = blocksDone(items)
   const tasks = items.filter((i) => i.data.type === 'task' && !i.data.habit && i.data.status !== 'skipped')
   const tasksDone = tasks.filter((i) => i.data.status === 'done').length
@@ -45,6 +45,14 @@ export function TodayHeader({ view }: { view: TodayView }) {
         </div>
       </div>
 
+      <figure className="mt-4 flex gap-2.5 rounded-2xl bg-accent-soft/60 px-4 py-3 dark:bg-accent-soft/50">
+        <Quote className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+        <div className="min-w-0">
+          <blockquote className="text-[15px] leading-snug text-ink">{quote.text}</blockquote>
+          <figcaption className="mt-1 text-xs text-ink-muted">— {quote.author}</figcaption>
+        </div>
+      </figure>
+
       <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-3">
         <dl className="flex items-center gap-4 text-sm">
           <div className="flex items-baseline gap-1.5">
@@ -59,6 +67,14 @@ export function TodayHeader({ view }: { view: TodayView }) {
               {tasksDone}/{tasks.length}
             </dd>
           </div>
+          {habitsDue.length > 0 && (
+            <div className="flex items-baseline gap-1.5">
+              <dt className="text-ink-muted">Habits</dt>
+              <dd className={cn('font-semibold tabular-nums', habitsDoneToday === habitsDue.length ? 'text-emerald-700 dark:text-emerald-300' : 'text-ink')}>
+                {habitsDoneToday}/{habitsDue.length}
+              </dd>
+            </div>
+          )}
         </dl>
 
         <div className="flex items-center gap-2">

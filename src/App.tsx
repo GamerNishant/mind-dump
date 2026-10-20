@@ -9,6 +9,7 @@ import { Splash } from '@/components/ui'
 import { AuthPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/AuthPages'
 import { BoardPage } from '@/pages/BoardPage'
 import { FocusPage } from '@/pages/FocusPage'
+import { HabitsPage } from '@/pages/HabitsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
 import { RulesPage } from '@/pages/RulesPage'
 import { ShutdownPage } from '@/pages/ShutdownPage'
@@ -114,6 +115,7 @@ export default function App() {
             <Route element={<RequireAuth><AppLayout /></RequireAuth>}>
               <Route index element={<BoardPage />} />
               <Route path="today" element={<TodayPage />} />
+              <Route path="habits" element={<HabitsPage />} />
               <Route path="focus" element={<FocusPage />} />
               <Route path="shutdown" element={<ShutdownPage />} />
               <Route path="rules" element={<RulesPage />} />
