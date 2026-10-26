@@ -79,6 +79,7 @@ function RolloverRunner({ planner }: { planner: Planner }) {
   const { active, activeStatus } = useDumpsState()
   const now = useNow()
   const attempted = useRef(new Set<string>())
+  const backfilled = useRef(false)
   const loadedOn = useRef<{ day: string; seq: number } | null>(null)
 
   useEffect(() => {
@@ -91,6 +92,10 @@ function RolloverRunner({ planner }: { planner: Planner }) {
       return
     }
     if (loadSeq === loadedOn.current.seq) return
+    if (!backfilled.current) {
+      backfilled.current = true
+      void planner.backfillStudyHours(now)
+    }
     const plan = planRollover({ docs, today, activeDumps: active })
     const key = (id: string, day: string | null) => `${loadSeq}:${today}:${id}:${day}`
     const updates = plan.updates.filter((d) => !attempted.current.has(key(d.id, d.day)))

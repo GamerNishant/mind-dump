@@ -257,14 +257,14 @@ The app is meant to take under 2 minutes in the morning and under 10 at night.
 | Screen / piece | What it does | Code |
 |---|---|---|
 | **+ Today** on each tile | Adds the tile to today's queue. The tile stays and gets an "In Today" chip. The caps apply. | [DumpCard.tsx](src/components/DumpCard.tsx), [BoardPage.tsx](src/pages/BoardPage.tsx) |
-| **Today** (`/today`) | The day's screen. Top: header (blocks done / cap, 7 Floor dots, "never miss twice"), Restart card, Morning Check card, **Next** card. Middle: the draggable **Queue**. Each item shows Block/Task, minutes, first action, minimum and carried ×N, with Done, Start and Skip. Bottom: add form (adding also creates a tile), "Pick from dump", hour log strip. | [TodayPage.tsx](src/pages/TodayPage.tsx), [components/today/](src/components/today/) |
+| **Today** (`/today`) | The day's screen, kept deliberately minimal (see §8.7). Top: header (greeting, date, one quiet line of blocks/tasks and 7 Floor dots, the quote, a ⋯ menu with Rules and Shut down day), Restart card, Morning Check card, habits still to do, the **Next** card. Then the draggable list of what comes after Next: one line per item (title, "Block · 50 min · first action", chips only when there's something to say), with Done, Start (blocks) and Skip. Everything else about an item is in its edit dialog (tap the title). Bottom: add form (adding also creates a tile), "Pick from dump", hour log strip (collapsed). | [TodayPage.tsx](src/pages/TodayPage.tsx), [components/today/](src/components/today/) |
 | **Skip sheet** | Start, Shrink, Say: "Do just 2 minutes", "Shrink to 10 min", or skip with a reason and a destination (later today / tomorrow / back to dump). Shows the matching if-then rules. | [SkipSheet.tsx](src/components/today/SkipSheet.tsx) |
-| **Focus** (`/focus`) | Countdown for the running block. It is wall-clock based, survives reloads and syncs across devices. Controls: pause, +10, end, and "Park a thought" (creates a tile). The end dialog asks "minimum met?" and "where did you stop?". That answer is saved as the tile's **Bookmark** and becomes the next first action. Study hours fill in automatically. | [FocusPage.tsx](src/pages/FocusPage.tsx) |
+| **Focus** (`/focus`) | Countdown for the running block. It is wall-clock based, survives reloads and syncs across devices. Controls: pause, +10, end, and "Park a thought" (creates a tile). The end dialog asks "minimum met?" and "where did you stop?". That answer is saved as the tile's **Bookmark** and becomes the next first action; leaving it empty means the work is finished, so the tile leaves the board. Study hours fill in automatically for every hour the block touched for 10+ minutes. | [FocusPage.tsx](src/pages/FocusPage.tsx) |
 | **Shutdown** (`/shutdown`) | A 10-minute screen. Resolve every open item, build tomorrow's queue, set Block 1's first action and minimum, tick the food check, then press "Shutdown complete". This records blocks done and the Floor. | [ShutdownPage.tsx](src/pages/ShutdownPage.tsx) |
 | **Repeat** in the edit dialog | Priority, then Off / Daily / Weekdays / chosen days, plus type, minutes, Light routine (doesn't count toward caps), minimum and Bookmark. Also "Split into lines" and "Make it a habit". | [EditDumpDialog.tsx](src/components/EditDumpDialog.tsx) |
 | **Rules** (`/rules`) | If-then plans, seeded with 15 starters and editable. Plan settings: block cap (the Ramp, 1–4), task cap, day start hour. | [RulesPage.tsx](src/pages/RulesPage.tsx) |
 | **Hour log** | "Where did the time go?": tap hours and mark a category (Study, Phone, Sleep, Food, Build, Chores, Leisure), or **Other…**, which asks what it was ("Gym") and keeps the name as a quick pick. A **Week** tab shows where the hours went, Monday to Sunday. | [HourLogStrip.tsx](src/components/today/HourLogStrip.tsx), [HourWeekView.tsx](src/components/today/HourWeekView.tsx) |
-| **Habits** (`/habits`, plus a card on Today) | The habit stack: small daily things that aren't tasks. One tap logs today. Shows the streak, the best streak and a 30-day consistency rate. Tap any of the last 7 days to fix it; a 12-week history grid. Due habits show highlighted near the top of Today and in Shutdown's checks. | [HabitsPage.tsx](src/pages/HabitsPage.tsx), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx) |
+| **Habits** (`/habits`, plus a card on Today) | The habit stack: small daily things that aren't tasks. One tap logs today and, on Today, the habit leaves the list (Undo in the toast). Shows the streak, the best streak and a 30-day consistency rate. Tap any of the last 7 days to fix it; a 12-week history grid. Due habits show highlighted near the top of Today and in Shutdown's checks. | [HabitsPage.tsx](src/pages/HabitsPage.tsx), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx) |
 | **Daily quote** | A short quote at the top of Today, one per planner day. | [TodayHeader.tsx](src/components/today/TodayHeader.tsx), [lib/quotes.ts](src/lib/quotes.ts) |
 | Morning landing | Before noon, the first visit to `/` in a browser session opens `/today`. | `MorningLanding` in [App.tsx](src/App.tsx) |
 
@@ -375,7 +375,24 @@ All of these were added without any SQL: they are a new `kind` (`habit`) and new
   - "No longer relevant" is also one of the reasons in the Skip sheet and in Shutdown.
 - **The backup** ([data/exportData.ts](src/data/exportData.ts)) reads straight from the backend rather than the stores. It therefore includes all history and every planner document, with no date cut-off.
 
-### 8.6 How to extend the planner
+### 8.6 Study hours, Today ⇄ board, and habits that leave the list
+
+- **Study hours from blocks** (`coveredHours` in [lib/plan.ts](src/lib/plan.ts)): every clock hour the focus span touched for at least `MIN_HOUR_OVERLAP_MIN` (10) minutes is filled as Study, empty cells only. The old rule (30+ minutes of one hour) meant a 50-minute block from 10:35 to 11:25 (25 + 25) logged nothing. A short session that reaches 10 minutes in no hour still fills the hour it spent most time in (if it ran 5+ minutes). Each session gets `hoursLogged: true` when its hours are written. On load, `Planner.backfillStudyHours` fills hours once for sessions from the last 14 days without the flag (blocks ended under the old rule), and never refills a cell you cleared.
+- **Today ⇄ board.** A tile and its Today item finish together:
+  - Done on a Today item (or a block ended with its minimum met and no Bookmark) clears its tile to History (`Planner.clearTileFor`). Recurring tiles (`repeat`), Light routines and routine items stay, since they come back. The cleared tile is remembered in memory, so Undo / `reopen` puts it back at its old spot.
+  - Clearing a tile on the board closes its open Today items as done (`Planner.completeFromTile`). The board's Undo restores the tile and reopens them.
+  - A block ended **with** a Bookmark keeps its tile: a Bookmark means there's more to do.
+- **Habits on Today** show only what's still to do. A tap shows the check (about half a second), then the habit leaves the list; the toast's Undo brings it back. With nothing due, the card isn't shown; once all are done it is one line.
+
+### 8.7 Keeping Today calm
+
+What's on screen all day shapes behaviour, so Today shows the next action and little else:
+- **Shut down day is out of sight during the day.** It lives in the header's ⋯ menu until either everything is done (a quiet secondary button) or wind-down time (`WIND_DOWN_HOUR`, 8 PM, until the day-start hour), when it becomes the primary button. The "Queue clear" card offers Shutdown only at wind-down; by day it suggests adding the next thing instead. A clear queue at noon shouldn't nudge an early close.
+- **No duplicates.** The Next card isn't repeated in the list below it; dragging reorders what comes after Next.
+- **Editing lives in the dialog.** Rows no longer carry type toggles, minute pickers, "+ First action / + Minimum" prompts or a pencil; the title opens the edit dialog. The Next card keeps first action (and Minimum, for blocks) inline, since that's what you act on.
+- **Quieter chrome:** the quote is a small italic line, counters and Floor dots share one small line, Rules moved into the ⋯ menu, the habits card has no box or progress bar, and the "Room left" caps line appears only when a cap is reached.
+
+### 8.8 How to extend the planner
 
 1. Add a new `kind` to `KIND`, and its data type, in [domain/plan.ts](src/domain/plan.ts).
 2. Add pure helpers to [lib/plan.ts](src/lib/plan.ts), with tests.

@@ -66,6 +66,8 @@ export class Planner {
   readonly store: PlannerStore
   private readonly dumps: DumpsStore
   private readonly userId: string
+  /** Tiles cleared because their Today item was done, by item id, so Undo can put them back. */
+  private readonly clearedTiles = new Map<string, Dump>()
 
   constructor(store: PlannerStore, dumps: DumpsStore, userId: string) {
     this.store = store
@@ -185,7 +187,42 @@ export class Planner {
     const doc = this.item(id)
     if (!doc) return false
     await this.closeSessionFor(id, minMet)
-    return this.putItem(doc, { status: 'done', minMet, doneAt: new Date().toISOString() })
+    const ok = await this.putItem(doc, { status: 'done', minMet, doneAt: new Date().toISOString() })
+    if (ok) await this.clearTileFor(doc)
+    return ok
+  }
+
+  /** Whether finishing this item also cleared its tile from the board (for the toast). */
+  clearedTileOf(itemId: string): boolean {
+    return this.clearedTiles.has(itemId)
+  }
+
+  /**
+   * A one-off tile is finished once its Today item is, so it leaves the board too (to History).
+   * Recurring and habit tiles stay, since they come back on their next day.
+   */
+  private async clearTileFor(doc: Doc<TodayItem>): Promise<void> {
+    const { dumpId, routine, habit } = doc.data
+    if (!dumpId || routine || habit) return
+    const meta = this.meta(dumpId)
+    if (meta.habit || meta.repeat?.length) return
+    if (!this.dumps.getState().active.some((d) => d.id === dumpId)) return
+    const cleared = await this.dumps.complete(dumpId)
+    if (cleared) this.clearedTiles.set(doc.id, cleared)
+  }
+
+  /**
+   * The other direction: a tile cleared on the board finishes its open Today items. Resolves to
+   * the ids it closed, so the board's Undo can reopen them.
+   */
+  async completeFromTile(dumpId: string): Promise<string[]> {
+    const open = docsOfKind<TodayItem>(this.docs, KIND.todayItem).filter((d) => d.data.dumpId === dumpId && d.data.status === 'open')
+    const closed: string[] = []
+    for (const doc of open) {
+      await this.closeSessionFor(doc.id, true)
+      if (await this.putItem(doc, { status: 'done', minMet: true, doneAt: new Date().toISOString() })) closed.push(doc.id)
+    }
+    return closed
   }
 
   /** A block running on an item that gets Done/Skipped elsewhere is closed with it. */
@@ -202,11 +239,17 @@ export class Planner {
     return new Date(Math.min(now.getTime(), plannedEnd))
   }
 
-  /** Undo for Done / Skip-to-dump. */
-  reopen(id: string): Promise<boolean> {
+  /** Undo for Done / Skip-to-dump. A tile that Done cleared goes back on the board. */
+  async reopen(id: string): Promise<boolean> {
     const doc = this.item(id)
-    if (!doc) return Promise.resolve(false)
-    return this.putItem(doc, { status: 'open', minMet: false, doneAt: null })
+    if (!doc) return false
+    const ok = await this.putItem(doc, { status: 'open', minMet: false, doneAt: null })
+    const tile = this.clearedTiles.get(id)
+    if (ok && tile) {
+      this.clearedTiles.delete(id)
+      if (!this.dumps.getState().active.some((d) => d.id === tile.id)) await this.dumps.restore(tile, 'original')
+    }
+    return ok
   }
 
   /**
@@ -360,7 +403,7 @@ export class Planner {
     const pausedMs = doc.data.pausedAt ? doc.data.pausedMs + Math.max(0, now.getTime() - Date.parse(doc.data.pausedAt)) : doc.data.pausedMs
     const end = this.cappedEnd(doc.data, now)
     const stoppedAt = result.stoppedAt.trim()
-    const ok = await this.putSession(doc, { endedAt: end.toISOString(), pausedAt: null, pausedMs, minMet: result.minMet, stoppedAt })
+    const ok = await this.putSession(doc, { endedAt: end.toISOString(), pausedAt: null, pausedMs, minMet: result.minMet, stoppedAt, hoursLogged: true })
     if (!ok) return false
 
     const item = doc.data.itemId ? this.item(doc.data.itemId) : null
@@ -369,20 +412,47 @@ export class Planner {
         ? { status: 'done', minMet: true, doneAt: now.toISOString() }
         : {}
       if (stoppedAt) patch.firstAction = resumeAction(stoppedAt)
-      if (Object.keys(patch).length) await this.putItem(item, patch)
+      // A Bookmark means there's more to do on the tile; without one, the block finished it.
+      const finished = result.minMet && !stoppedAt
+      if (Object.keys(patch).length && (await this.putItem(item, patch)) && finished) await this.clearTileFor(item)
     }
     if (doc.data.dumpId && stoppedAt) {
       await this.store.put(this.metaDoc({ ...this.meta(doc.data.dumpId), resumeNote: stoppedAt }))
     }
 
-    // Wall-clock span minus pauses ≈ focus; fill the hours it mostly covered (only empty cells).
-    const start = new Date(Date.parse(doc.data.startedAt) + pausedMs)
+    await this.logStudyHours(new Date(Date.parse(doc.data.startedAt) + pausedMs), end)
+    return true
+  }
+
+  /**
+   * Fill Study in every hour a focus span touched (see coveredHours), across both hours when a
+   * block crosses the hour and across planner days at the day boundary. Only empty cells.
+   * Wall-clock span minus pauses ≈ focus, so pauses are taken off the start.
+   */
+  private async logStudyHours(start: Date, end: Date): Promise<void> {
     const byDay = new Map<string, number[]>()
     for (const { day, hour } of coveredHours(start, end, this.settings().dayStartHour)) {
       byDay.set(day, [...(byDay.get(day) ?? []), hour])
     }
     for (const [day, hours] of byDay) await this.setHours(day, hours, 'study', { onlyEmpty: true })
-    return true
+  }
+
+  /**
+   * One-off repair for blocks ended before hours were logged per session (older versions only
+   * filled hours a block covered for 30+ minutes, so blocks crossing the hour logged nothing).
+   * Fills their empty Study cells from the last two weeks, then marks each session logged so a
+   * cell cleared by hand is never refilled.
+   */
+  async backfillStudyHours(now = new Date()): Promise<void> {
+    const since = addDays(this.today(now), -14)
+    const pending = docsOfKind<FocusSession>(this.docs, KIND.focus).filter(
+      (d) => d.data.endedAt && !d.data.hoursLogged && (d.day ?? '') >= since,
+    )
+    for (const doc of pending) {
+      const start = new Date(Date.parse(doc.data.startedAt) + doc.data.pausedMs)
+      await this.logStudyHours(start, new Date(doc.data.endedAt!))
+      await this.putSession(doc, { hoursLogged: true })
+    }
   }
 
   // ---- Hour log --------------------------------------------------------------------------

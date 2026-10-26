@@ -174,11 +174,29 @@ describe('planRollover', () => {
 })
 
 describe('hours and focus', () => {
-  it('fills hours a session mostly covered', () => {
+  it('fills every hour a session spent 10+ minutes in', () => {
     const covered = coveredHours(new Date(2026, 9, 18, 4, 10), new Date(2026, 9, 18, 6, 20), 3)
-    expect(covered).toEqual([
-      { day: '2026-10-18', hour: 4 },
-      { day: '2026-10-18', hour: 5 },
+    expect(covered.map((c) => c.hour)).toEqual([4, 5, 6])
+    // 6:05 is only 5 minutes into hour 6: not counted.
+    expect(coveredHours(new Date(2026, 9, 18, 4, 10), new Date(2026, 9, 18, 6, 5), 3).map((c) => c.hour)).toEqual([4, 5])
+  })
+
+  it('a 50-minute block across the hour fills both hours', () => {
+    expect(coveredHours(new Date(2026, 9, 18, 10, 35), new Date(2026, 9, 18, 11, 25), 3)).toEqual([
+      { day: '2026-10-18', hour: 10 },
+      { day: '2026-10-18', hour: 11 },
+    ])
+  })
+
+  it('a short block split by the hour still fills the hour it spent most time in', () => {
+    expect(coveredHours(new Date(2026, 9, 18, 10, 52), new Date(2026, 9, 18, 11, 0), 3)).toEqual([{ day: '2026-10-18', hour: 10 }])
+    expect(coveredHours(new Date(2026, 9, 18, 10, 58), new Date(2026, 9, 18, 11, 1), 3)).toEqual([]) // under 5 minutes
+  })
+
+  it('a block across the day boundary fills hours on both planner days', () => {
+    expect(coveredHours(new Date(2026, 9, 18, 2, 30), new Date(2026, 9, 18, 3, 20), 3)).toEqual([
+      { day: '2026-10-17', hour: 2 },
+      { day: '2026-10-18', hour: 3 },
     ])
   })
 

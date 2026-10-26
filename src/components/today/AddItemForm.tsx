@@ -30,6 +30,7 @@ export function AddItemForm({ view }: { view: TodayView }) {
 
   const blocksLeft = Math.max(0, view.settings.blockCap - view.usage.blocks)
   const tasksLeft = Math.max(0, view.settings.taskCap - view.usage.tasks)
+  const full = blocksLeft === 0 || tasksLeft === 0
 
   /** `createdTile`: the add also created a new dump tile (typed items), so Undo removes that too. */
   const announce = (result: AddResult, title: string, createdTile = false) => {
@@ -80,7 +81,7 @@ export function AddItemForm({ view }: { view: TodayView }) {
           maxLength={300}
           placeholder="Add to Today…"
           aria-label="Add to Today"
-          aria-describedby="add-capacity"
+          aria-describedby={full ? 'add-capacity' : undefined}
           className="h-11 min-w-0 flex-1 basis-full rounded-xl border border-line bg-card px-3.5 text-base text-ink shadow-xs transition placeholder:text-ink-subtle hover:border-line-strong focus:border-accent focus:outline-none focus:ring-4 focus:ring-accent/15 sm:basis-0 sm:text-sm"
         />
         <div role="group" aria-label="Type" className="inline-flex h-11 shrink-0 rounded-xl border border-line bg-card p-1">
@@ -107,12 +108,15 @@ export function AddItemForm({ view }: { view: TodayView }) {
       </form>
 
       <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1">
-        <p id="add-capacity" className="text-xs text-ink-subtle">
-          Room left: {plural(blocksLeft, 'block')} · {plural(tasksLeft, 'task')}{' '}
-          <span className="text-ink-subtle">
-            (max {view.settings.blockCap} · {view.settings.taskCap})
-          </span>
-        </p>
+        {/* Only when something is full: the caps don't need to be on screen all day. */}
+        {full && (
+          <p id="add-capacity" className="text-xs text-ink-subtle">
+            Room left: {plural(blocksLeft, 'block')} · {plural(tasksLeft, 'task')}{' '}
+            <span className="text-ink-subtle">
+              (max {view.settings.blockCap} · {view.settings.taskCap})
+            </span>
+          </p>
+        )}
         <Button variant="ghost" size="sm" onClick={() => setPicking(true)} className="ml-auto h-10">
           <Inbox aria-hidden />
           Pick from dump

@@ -85,16 +85,17 @@ test('Habits: start one from Today, tap to log, streak on the Habits page, edit 
   await expect(card).toContainText('0 of 1 done')
   await expect(nav(page).getByRole('link', { name: /Habits/ })).toContainText('1')
 
+  // One tap logs it and it leaves today's list; Undo in the toast brings it back.
   await habit.click()
-  await expect(habit).toHaveAttribute('aria-pressed', 'true')
   await expect(card).toContainText('1 of 1 done')
+  await expect(habit).toHaveCount(0)
   await expect(card).toContainText('All done today')
-  await expect(page.getByRole('definition').filter({ hasText: '1/1' })).toBeVisible() // header stat
 
-  // Undo is just another tap; then done again.
-  await habit.click()
+  await page.locator('[data-sonner-toast]').filter({ hasText: 'Habit done' }).getByRole('button', { name: 'Undo' }).click()
   await expect(habit).toHaveAttribute('aria-pressed', 'false')
+  await expect(card).toContainText('0 of 1 done')
   await habit.click()
+  await expect(habit).toHaveCount(0)
 
   await card.getByRole('link', { name: 'Manage' }).click()
   await expect(page.getByRole('heading', { name: 'Habits', level: 1 })).toBeVisible()
@@ -232,8 +233,7 @@ test('no horizontal overflow on /habits and the Week view at phone width', async
   await noHorizontalOverflow(page)
 })
 
-const queue = (page: Page) => page.getByRole('list', { name: "Today's queue" })
-const queueRow = (page: Page, text: string) => queue(page).locator('li').filter({ hasText: text })
+const queueRow = (page: Page, text: string) => page.locator('[data-today-item]').filter({ hasText: text })
 
 async function addTodayItem(page: Page, text: string) {
   await page.getByRole('textbox', { name: 'Add to Today' }).fill(text)

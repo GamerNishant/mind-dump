@@ -241,7 +241,13 @@ function FocusView({ session }: { session: Doc<FocusSession> }) {
           setBusy(false)
           if (!ok) return
           setEndOpen(false)
-          toast(stoppedAt.trim() ? 'Block logged. Bookmark saved.' : 'Block logged.')
+          toast(
+            stoppedAt.trim()
+              ? 'Block logged. Bookmark saved.'
+              : session.data.itemId && planner.clearedTileOf(session.data.itemId)
+                ? 'Block logged. Cleared from the board too.'
+                : 'Block logged.',
+          )
           // Replace: the ended session also triggers FocusPage's <Navigate replace>; pushing here
           // would leave a duplicate /today entry in history.
           void navigate('/today', { replace: true })
@@ -325,7 +331,7 @@ function EndDialog({
             autoComplete="off"
             className="h-11 w-full rounded-xl border border-line bg-card px-3.5 text-base text-ink shadow-xs transition placeholder:text-ink-subtle hover:border-line-strong focus:border-accent focus:ring-4 focus:ring-accent/15 focus:outline-none sm:text-sm"
           />
-          <p className="mt-1.5 text-xs text-ink-subtle">Saved as the Bookmark: it becomes the next first action.</p>
+          <p className="mt-1.5 text-xs text-ink-subtle">Saved as the Bookmark: it becomes the next first action. All finished? Leave it empty and the tile leaves the board.</p>
         </div>
       </form>
     </Modal>

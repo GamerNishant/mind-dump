@@ -15,7 +15,7 @@ import { Button, buttonClass, EmptyState, focusRing } from '@/components/ui'
 import type { FocusSession, TodayItem } from '@/domain/plan'
 import { useNow } from '@/hooks/useNow'
 import { cn } from '@/lib/cn'
-import { focusRemainingMs, formatClock, type Doc } from '@/lib/plan'
+import { focusRemainingMs, formatClock, isWindDown, type Doc } from '@/lib/plan'
 import { usePlanner, useToday } from '@/state/PlannerProvider'
 
 const pageClass = 'mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(6rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-8'
@@ -90,7 +90,7 @@ export function TodayPage() {
               {view.next ? (
                 <NextCard view={view} onSkip={setSkipping} onEdit={(i) => setEditingId(i.id)} />
               ) : (
-                <QueueClear shutdownDone={!!view.plan.shutdownAt} />
+                <QueueClear shutdownDone={!!view.plan.shutdownAt} windDown={isWindDown(view.now, view.settings.dayStartHour)} />
               )}
               <QueueList view={view} onSkip={setSkipping} onEdit={(i) => setEditingId(i.id)} />
             </>
@@ -141,14 +141,22 @@ function FocusBanner({ session }: { session: FocusSession }) {
   )
 }
 
-function QueueClear({ shutdownDone }: { shutdownDone: boolean }) {
+/**
+ * Everything is Done or Skipped. During the day it invites more work rather than an early
+ * close; the Shutdown button only leads here at wind-down time.
+ */
+function QueueClear({ shutdownDone, windDown }: { shutdownDone: boolean; windDown: boolean }) {
   return (
     <section className="animate-fade-up rounded-3xl border border-line bg-card p-5 text-center sm:p-6">
       <h2 className="text-lg font-semibold tracking-tight">Queue clear</h2>
       <p className="mt-1 text-sm text-ink-muted">
-        {shutdownDone ? 'Day closed. Rest well.' : 'Everything is Done or Skipped. Shut down the day when you are ready.'}
+        {shutdownDone
+          ? 'Day closed. Rest well.'
+          : windDown
+            ? 'Everything is Done or Skipped. Shut down the day when you are ready.'
+            : 'Nice work. Still daytime: add the next thing below, or pull one in from the board.'}
       </p>
-      {!shutdownDone && (
+      {!shutdownDone && windDown && (
         <Link to="/shutdown" className={buttonClass('primary', 'md', 'mt-4')}>
           Shut down day
         </Link>

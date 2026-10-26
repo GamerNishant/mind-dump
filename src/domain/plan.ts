@@ -125,6 +125,8 @@ export interface FocusSession {
   endedAt: string | null
   minMet: boolean | null
   stoppedAt: string
+  /** Its Study hours were filled in the hour log (absent on sessions from older versions). */
+  hoursLogged?: boolean
 }
 
 export const HOUR_CATEGORIES = ['study', 'phone', 'sleep', 'food', 'build', 'chores', 'leisure', 'other'] as const
@@ -215,6 +217,8 @@ export const MAX_BLOCK_CAP = 4
 export const STARTER_MINUTES = 2
 export const SHRUNK_MINUTES = 10
 export const SHUTDOWN_MINUTES = 10
+/** From this hour (local) the Shutdown prompt comes forward; before it, it stays tucked away. */
+export const WIND_DOWN_HOUR = 20
 /** Carried this many times → "Too big? Split it." */
 export const CARRY_WARN = 3
 

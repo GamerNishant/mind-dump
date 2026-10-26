@@ -123,19 +123,29 @@ export function BoardPage() {
             next.delete(dump.id)
             return next
           })
+          // Its open Today items are finished with it; Undo reopens them too.
+          let closedItems: Promise<string[]> = Promise.resolve([]) // set right below, before any Undo
           const toastId = toast.success('Cleared from your mind', {
             description: preview(dump.content),
-            action: { label: 'Undo', onClick: () => void store.restore(dump, 'original') },
+            action: {
+              label: 'Undo',
+              onClick: () => {
+                void store.restore(dump, 'original')
+                void closedItems.then((ids) => ids.forEach((id) => void planner.reopen(id)))
+              },
+            },
           })
-          void store.complete(dump.id).then((result) => {
-            if (!result) toast.dismiss(toastId)
+          closedItems = store.complete(dump.id).then((result) => {
+            if (result) return planner.completeFromTile(dump.id)
+            toast.dismiss(toastId)
+            return []
           })
           restoreFocus()
         },
         prefersReducedMotion() ? 0 : EXIT_MS,
       )
     },
-    [store, focusAfterRemoval],
+    [store, planner, focusAfterRemoval],
   )
 
   const reorder = useCallback(

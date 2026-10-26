@@ -1,5 +1,6 @@
-import { useId, useState, type FormEvent } from 'react'
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react'
 import { Link } from 'react-router'
+import { toast } from 'sonner'
 import { Check, ChevronRight, Flame, Plus, X } from 'lucide-react'
 import { celebrate } from '@/components/celebrate'
 import { Button, focusRing } from '@/components/ui'
@@ -10,86 +11,105 @@ import { currentStreak, isDone, isDue, missedLast } from '@/lib/habits'
 import type { Doc } from '@/lib/plan'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
 
+/** How long a just-logged habit stays to show its check before it leaves the list. */
+const LEAVE_MS = 700
+
 /**
- * Today's habits, highlighted at the top of Today: one tap logs a habit as done (tap again to
- * undo). Shows each streak, and a gentle "never miss twice" nudge after a missed day.
+ * Today's habits, highlighted at the top of Today: one tap logs a habit as done, and it leaves
+ * the list (Undo in the toast brings it back). Shows each streak, and a gentle "never miss
+ * twice" nudge after a missed day.
  */
 export function HabitStackCard({ view }: { view: TodayView }) {
   const { habits, habitsDue, habitsDoneToday, today } = view
   const headingId = useId()
+  const planner = usePlanner()
+  // Habits logged a moment ago, still shown while their check animates.
+  const [leaving, setLeaving] = useState<ReadonlySet<string>>(new Set())
+  const timers = useRef(new Map<string, number>())
+  useEffect(() => {
+    const pending = timers.current
+    return () => pending.forEach((t) => window.clearTimeout(t))
+  }, [])
+
+  const onLogged = (habit: Doc<Habit>) => {
+    setLeaving((s) => new Set(s).add(habit.id))
+    window.clearTimeout(timers.current.get(habit.id))
+    timers.current.set(
+      habit.id,
+      window.setTimeout(() => {
+        timers.current.delete(habit.id)
+        setLeaving((s) => {
+          const next = new Set(s)
+          next.delete(habit.id)
+          return next
+        })
+      }, prefersReducedMotion() ? 0 : LEAVE_MS),
+    )
+    toast.success('Habit done', {
+      description: habit.data.name,
+      action: { label: 'Undo', onClick: () => void planner.toggleHabit(habit.id, today) },
+    })
+  }
+
+  const pending = habitsDue.filter((h) => !isDone(h.data, today) || leaving.has(h.id))
 
   if (habits.length === 0) return <FirstHabit />
 
   const total = habitsDue.length
-  const allDone = total > 0 && habitsDoneToday === total
-  const resting = habits.length - total
+  // Nothing due today: no card at all (the Habits page still has them).
+  if (total === 0) return null
+  const allDone = habitsDoneToday === total && pending.length === 0
 
   return (
-    <section
-      aria-labelledby={headingId}
-      className="animate-fade-up rounded-3xl border border-emerald-500/30 bg-gradient-to-br from-emerald-500/[0.07] to-transparent p-4 sm:p-5 dark:border-emerald-400/25 dark:from-emerald-400/[0.08]"
-    >
+    <section aria-labelledby={headingId} className="animate-fade-up">
       <div className="flex items-center gap-2">
         <Flame className="size-4 shrink-0 text-emerald-700 dark:text-emerald-300" aria-hidden />
-        <h2 id={headingId} className="text-[15px] font-semibold tracking-tight text-ink">
+        <h2 id={headingId} className="text-sm font-semibold tracking-tight text-ink">
           Habits
         </h2>
-        {total > 0 && (
-          <span className="text-sm text-ink-muted tabular-nums" aria-live="polite">
-            {habitsDoneToday} of {total} done
-          </span>
-        )}
-        <Link to="/habits" className={cn('ml-auto inline-flex min-h-9 items-center gap-0.5 rounded-lg px-2 text-sm font-medium text-ink-muted hover:bg-sunken hover:text-ink', focusRing)}>
+        <span className="text-xs text-ink-subtle tabular-nums" aria-live="polite">
+          {habitsDoneToday} of {total} done
+        </span>
+        <Link to="/habits" className={cn('ml-auto inline-flex min-h-9 items-center gap-0.5 rounded-lg px-2 text-xs font-medium text-ink-subtle hover:bg-sunken hover:text-ink', focusRing)}>
           Manage
-          <ChevronRight className="size-4" aria-hidden />
+          <ChevronRight className="size-3.5" aria-hidden />
         </Link>
       </div>
 
-      {total > 0 && (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-emerald-500/15" aria-hidden>
-          <div
-            className="h-full rounded-full bg-emerald-600 transition-[width] duration-500 motion-reduce:transition-none dark:bg-emerald-400"
-            style={{ width: `${(habitsDoneToday / total) * 100}%` }}
-          />
-        </div>
-      )}
-
-      {total === 0 ? (
-        <p className="mt-3 text-sm text-ink-muted">No habits due today. Rest day.</p>
+      {allDone ? (
+        <p className="mt-1 text-sm text-emerald-700 dark:text-emerald-300">All done today. That's a vote for who you're becoming.</p>
       ) : (
-        <ul className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {habitsDue.map((habit) => (
-            <li key={habit.id}>
-              <HabitButton habit={habit} today={today} />
+        <ul className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-2">
+          {pending.map((habit) => (
+            <li key={habit.id} className={cn(leaving.has(habit.id) && 'animate-habit-out motion-reduce:animate-none')}>
+              <HabitButton habit={habit} today={today} onLogged={onLogged} />
             </li>
           ))}
         </ul>
-      )}
-
-      {(allDone || resting > 0) && (
-        <p className="mt-3 text-xs text-ink-subtle">
-          {allDone && <span className="font-medium text-emerald-700 dark:text-emerald-300">All done today. That's a vote for who you're becoming. </span>}
-          {resting > 0 && `${resting} resting today.`}
-        </p>
       )}
     </section>
   )
 }
 
-/** The big one-tap row: tap = done, tap again = undo. */
-export function HabitButton({ habit, today }: { habit: Doc<Habit>; today: string }) {
+/**
+ * The big one-tap row: tap = done, tap again = undo. `onLogged` runs after a tap marks it done
+ * (Today uses it to take the habit off the list).
+ */
+export function HabitButton({ habit, today, onLogged }: { habit: Doc<Habit>; today: string; onLogged?: (habit: Doc<Habit>) => void }) {
   const planner = usePlanner()
   const done = isDone(habit.data, today)
   const streak = currentStreak(habit.data, today)
   const nudge = !done && missedLast(habit.data, today)
 
   const toggle = async (target: HTMLElement) => {
+    if (onLogged && done) return // already leaving the list
     const next = await planner.toggleHabit(habit.id, today)
     if (!next) return
     navigator.vibrate?.(12)
     const due = planner.habits().filter((h) => isDue(h.data, today))
     const allDone = due.every((h) => isDone(h.data, today))
     celebrate(allDone ? null : target, allDone ? 'big' : 'small')
+    onLogged?.(habit)
   }
 
   return (
@@ -98,7 +118,7 @@ export function HabitButton({ habit, today }: { habit: Doc<Habit>; today: string
       aria-pressed={done}
       onClick={(e) => void toggle(e.currentTarget)}
       className={cn(
-        'group flex min-h-14 w-full items-center gap-3 rounded-2xl border px-3 py-2.5 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.98] motion-reduce:active:scale-100',
+        'group flex min-h-12 w-full items-center gap-3 rounded-xl border px-3 py-2 text-left transition-[background-color,border-color,transform] duration-150 active:scale-[0.98] motion-reduce:active:scale-100',
         focusRing,
         done
           ? 'border-emerald-600/30 bg-emerald-600/10 dark:border-emerald-400/30 dark:bg-emerald-400/10'
@@ -133,6 +153,8 @@ export function HabitButton({ habit, today }: { habit: Doc<Habit>; today: string
 
 /** No habits yet: a one-line way to start the stack. */
 const isBool = (v: unknown): v is boolean => typeof v === 'boolean'
+
+const prefersReducedMotion = () => window.matchMedia?.('(prefers-reduced-motion: reduce)').matches ?? false
 
 function FirstHabit() {
   const planner = usePlanner()

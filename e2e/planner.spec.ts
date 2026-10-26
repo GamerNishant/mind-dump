@@ -67,6 +67,13 @@ async function openToday(page: Page) {
 }
 
 /** The Morning Check card appears on /today before 2 PM; close it when it's there. */
+/** Rules lives in Today's ⋯ menu. */
+async function openRules(page: Page) {
+  if (!/\/today$/.test(page.url())) await openToday(page)
+  await page.getByRole('button', { name: 'More' }).click()
+  await page.getByRole('link', { name: 'Rules' }).click()
+}
+
 async function dismissMorningCheck(page: Page) {
   // Let the planner settle so the card has had its chance to render.
   await expect(page.getByRole('textbox', { name: 'Add to Today' })).toBeVisible()
@@ -89,7 +96,8 @@ async function clearToasts(page: Page) {
 
 const queue = (page: Page) => page.getByRole('list', { name: "Today's queue" })
 /** A queue row (the first row's text carries a screen-reader "Next: " prefix, so match loosely). */
-const queueRow = (page: Page, text: string) => queue(page).locator('li').filter({ hasText: text })
+/** An open item: the Next card or a row in the list after it. */
+const queueRow = (page: Page, text: string) => page.locator('[data-today-item]').filter({ hasText: text })
 
 /** Type an item into Today's add form. */
 async function addTodayItem(page: Page, text: string, type: 'Task' | 'Block' = 'Task') {
@@ -124,7 +132,6 @@ test('"+ Today" on a tile adds it to Today; the tile stays with an "In Today" ch
 
   await openToday(page)
   await expect(queueRow(page, 'Write the essay intro')).toBeVisible()
-  await expect(page.getByText('1 open')).toBeVisible()
 })
 
 // ---- 2. Add form → queue + board tile; Done; reopen -----------------------------------------
@@ -144,7 +151,7 @@ test('Today: typed item lands in the queue and on the board; Done and reopen', a
 
   await openToday(page)
   await page.getByRole('button', { name: 'Done: Call the bank' }).click()
-  await expect(toast(page, 'Done')).toBeVisible()
+  await expect(toast(page, 'Done')).toContainText('cleared from the board too')
   await expect(queue(page)).toHaveCount(0)
   await expect(page.getByRole('heading', { name: 'Queue clear' })).toBeVisible()
 
@@ -167,9 +174,12 @@ test('Block: Start, focus countdown, park a thought, End with a Bookmark', async
   await openToday(page)
   await addTodayItemOk(page, 'Read PSIR chapter 3')
 
-  // Switch the task to a Block from its queue row.
-  await page.getByRole('button', { name: 'Type: Task. Switch to Block' }).click()
-  await expect(page.getByRole('button', { name: 'Type: Block. Switch to Task' })).toBeVisible()
+  // Switch the task to a Block from its edit dialog.
+  await page.getByRole('button', { name: 'Edit or remove: Read PSIR chapter 3' }).click()
+  const editItem = page.getByRole('dialog', { name: 'Edit item' })
+  await editItem.getByRole('group', { name: 'Kind' }).getByRole('button', { name: 'Focus block' }).click()
+  await editItem.getByRole('button', { name: 'Save' }).click()
+  await expect(editItem).toBeHidden()
   await expect(page.getByRole('region', { name: 'Next' })).toContainText('Block · 50 min')
 
   await page.getByRole('region', { name: 'Next' }).getByRole('button', { name: 'Start' }).click()
@@ -260,7 +270,6 @@ test('Skip sheet: Say with a reason + Tomorrow takes it out of today', async ({ 
   await expect(toast(page, 'Skipped: Tired → Tomorrow')).toBeVisible()
   await expect(queueRow(page, 'Clean the garage')).toHaveCount(0)
   await expect(queueRow(page, 'Email Priya')).toBeVisible()
-  await expect(page.getByText('1 open')).toBeVisible()
 
   // It now sits in tomorrow's queue.
   await page.goto('/shutdown')
@@ -300,7 +309,10 @@ test('Shutdown: resolve items, add a tile to tomorrow, complete', async ({ page 
   await addTodayItemOk(page, 'Pay rent')
   await addTodayItemOk(page, 'Fix the bike')
 
-  await page.getByRole('link', { name: 'Shut down day' }).click()
+  // By day it's tucked in the ⋯ menu; from wind-down time it's a header button.
+  const more = page.getByRole('button', { name: 'More' })
+  if (await more.isVisible()) await more.click()
+  await page.getByRole('link', { name: 'Shut down day' }).first().click()
   await expect(page).toHaveURL(/\/shutdown$/)
   await expect(page.getByRole('heading', { name: 'Shutdown', level: 1 })).toBeVisible()
 
@@ -348,7 +360,7 @@ test('Shutdown: resolve items, add a tile to tomorrow, complete', async ({ page 
 test('Rules: seeded rules, block cap stepper, third block refused', async ({ page }) => {
   await signUp(page)
   await openToday(page)
-  await page.getByRole('link', { name: 'Rules' }).click()
+  await openRules(page)
   await expect(page.getByRole('heading', { name: 'Rules', level: 1 })).toBeVisible()
   await expect(page.getByText('I wake at 4 and reach for the phone')).toBeVisible()
   await expect(page.getByRole('switch')).toHaveCount(15)
@@ -363,15 +375,13 @@ test('Rules: seeded rules, block cap stepper, third block refused', async ({ pag
   await expect(page.getByRole('switch')).toHaveCount(15)
 
   await openToday(page)
-  await expect(page.getByText('(max 3 · 5)')).toBeVisible()
 
   // Back to 2 and enforce it.
-  await page.getByRole('link', { name: 'Rules' }).click()
+  await openRules(page)
   await page.getByRole('group', { name: 'Block cap' }).getByRole('button', { name: 'Fewer (Block cap)' }).click()
   await expect(page.getByRole('group', { name: 'Block cap' }).locator('output')).toHaveText('2')
 
   await openToday(page)
-  await expect(page.getByText('(max 2 · 5)')).toBeVisible()
   await addTodayItemOk(page, 'Block one', 'Block')
   await addTodayItemOk(page, 'Block two', 'Block')
   await expect(page.getByText('Room left: 0 blocks')).toBeVisible()
@@ -386,8 +396,11 @@ test('Rules: seeded rules, block cap stepper, third block refused', async ({ pag
   await expect(queueRow(page, 'Block three')).toBeVisible()
   // Switching that task to a Block is refused too.
   await clearToasts(page)
-  await queueRow(page, 'Block three').getByRole('button', { name: 'Type: Task. Switch to Block' }).click()
-  await expect(toast(page, 'Today is full — the block cap is 2')).toBeVisible()
+  await queueRow(page, 'Block three').getByRole('button', { name: 'Edit or remove: Block three' }).click()
+  const editItem = page.getByRole('dialog', { name: 'Edit item' })
+  await editItem.getByRole('group', { name: 'Kind' }).getByRole('button', { name: 'Focus block' }).click()
+  await editItem.getByRole('button', { name: 'Save' }).click()
+  await expect(toast(page, 'Today is full: the block cap is 2')).toBeVisible()
 })
 
 // ---- 8. Hour log ---------------------------------------------------------------------------
@@ -442,7 +455,7 @@ test('no horizontal overflow on /today, /focus, /shutdown, /rules at phone width
   await page.getByRole('button', { name: /Where did the time go\?/ }).click()
   await noHorizontalOverflow(page)
 
-  await page.getByRole('link', { name: 'Rules' }).click()
+  await openRules(page)
   await expect(page.getByText('I wake at 4 and reach for the phone')).toBeVisible()
   await noHorizontalOverflow(page)
 

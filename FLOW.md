@@ -185,8 +185,10 @@ sequenceDiagram
   BP->>BP: restoreFocus() → next tile's button or composer
   S->>API: complete(id)  [Supabase: update status='done', trigger sets completed_at]
   API-->>S: ok / error (rollback + toast.error, BoardPage dismisses Undo toast)
+  BP->>BP: on ok: planner.completeFromTile(id) marks its open Today items done (ids kept for Undo)
   U->>BP: clicks Undo in toast
   BP->>S: restore(dump, 'original')
+  BP->>BP: planner.reopen(each closed Today item)
   S->>S: position = freePositionNear(others, dump.position), then apply: back into active
   S->>API: restore(id, position)  [chained after complete via chains]
 ```
@@ -423,15 +425,17 @@ The tile stays on the board. `useToday().inToday` drives its "In Today" chip.
 
 [TodayPage](src/pages/TodayPage.tsx) reads `useToday()`.
 - **While not ready:** it shows the loading skeleton, the error state or the setup card.
-- **Once ready, top to bottom:** the header ([TodayHeader](src/components/today/TodayHeader.tsx)), `RestartCard`, `MorningCheckCard`, `NextCard` and `QueueList` ([QueueList.tsx](src/components/today/QueueList.tsx)), `AddItemForm`, `HourLogStrip`, and the `SkipSheet`.
+- **Once ready, top to bottom:** the header ([TodayHeader](src/components/today/TodayHeader.tsx)), `RestartCard`, `MorningCheckCard`, `HabitStackCard`, `NextCard` (or `QueueClear` when nothing is open) and `QueueList` ([QueueList.tsx](src/components/today/QueueList.tsx)), `AddItemForm`, `HourLogStrip`, and the `SkipSheet`.
+- **Header:** `isWindDown(now, dayStartHour)` (8 PM until the day-start hour) and "all done" decide whether Shut down day is a header button (primary at wind-down, secondary when all done) or an item in the ⋯ `MoreMenu`, which also holds Rules. `QueueClear` shows its Shutdown button only at wind-down.
+- **List:** `QueueList` shows the open items except `view.next` (the Next card shows that one). A drop reorders that list and passes `[nextId, ...moved]` to `planner.reorder`, so Next stays first.
 - **While a focus session runs:** a sticky banner links to `/focus`.
 
 The actions on this screen:
 - **Add text:** `planner.addText(text, type)` calls `dumpsStore.addMany([text])` to create the tile, then `addFromDump`.
 - **Reorder** (dnd-kit, using the grip handle): `planner.reorder(day, movedId, orderedIds)`. `planMove` writes one `order` value, or rebalances them all when needed.
-- **Done:** `planner.complete(id, minMet)`. For tasks, the toast offers "Also clear the tile", which calls `dumpsStore.complete`.
-- **Reopen:** `planner.reopen`.
-- **Edit type, minutes, first action or minimum:** `planner.updateItem`.
+- **Done:** `planner.complete(id, minMet)` marks the item done, then `clearTileFor(item)` clears its tile with `dumpsStore.complete` (one-off tiles only: not routine items, Light routines or tiles with `repeat`) and keeps the cleared `Dump` in `clearedTiles`. The toast says "cleared from the board too" (`planner.clearedTileOf(id)`), and its Undo calls `reopen`.
+- **Reopen:** `planner.reopen` reopens the item and, if Done had cleared its tile, calls `dumpsStore.restore(tile, 'original')`.
+- **Edit type, minutes, first action or minimum:** in the edit dialog (tap the title), or first action / minimum inline on the Next card: `planner.updateItem`.
   - Switching to a block checks the block cap.
   - Type, minutes and minimum are remembered in `tile_meta` for next time.
 
@@ -459,7 +463,9 @@ The actions on this screen:
    - ends the session;
    - marks the item done if the minimum was met;
    - saves "where did you stop?" as the item's first action and as `tile_meta.resumeNote` (the Bookmark);
-   - marks the hours the block mostly covered as Study, filling empty cells only.
+   - if the minimum was met and no Bookmark was left, clears the tile from the board (`clearTileFor`); a Bookmark keeps it;
+   - calls `logStudyHours(start + pauses, end)`. `coveredHours` returns every hour the span touched for 10+ minutes (or, failing that, its biggest hour if it ran 5+ minutes), grouped by planner day, and `setHours(day, hours, 'study', { onlyEmpty: true })` fills them. The session is saved with `hoursLogged: true`.
+5. **Backfill on load:** `RolloverRunner` calls `planner.backfillStudyHours(now)` once per app load, after the first fresh planner load. Ended sessions from the last 14 days without `hoursLogged` get their hours filled once and are then flagged.
 
 ### 7.7 Morning Check, Restart
 
@@ -501,9 +507,11 @@ The actions on this screen:
 
 Code: [src/lib/habits.ts](src/lib/habits.ts) (pure rules), `Planner` habit methods in [src/state/planner.ts](src/state/planner.ts), [HabitStackCard.tsx](src/components/habits/HabitStackCard.tsx), [HabitsPage.tsx](src/pages/HabitsPage.tsx).
 
-1. **Read.** `useToday()` calls `habitsOf(docs)`, which normalizes and sorts the `habit` documents, then filters them with `isDue(habit, today)`. It returns `habits`, `habitsDue` and `habitsDoneToday`. The header's `HabitsLink` badge, the Today header's "Habits n/m" stat, `HabitStackCard` and Shutdown all read these.
+1. **Read.** `useToday()` calls `habitsOf(docs)`, which normalizes and sorts the `habit` documents, then filters them with `isDue(habit, today)`. It returns `habits`, `habitsDue` and `habitsDoneToday`. The header's `HabitsLink` badge, `HabitStackCard` and Shutdown all read these.
 2. **Add.** From the "Start a habit" card on Today, or the form on `/habits`: `planner.addHabit(name, days)` cleans the name (80 characters at most), puts it at the end of the stack and sets `startDay = today`. It is one `store.put` of an undated `habit` document.
-3. **Tap to log.** `HabitButton` (on Today and in Shutdown) or a day cell on `/habits` calls `planner.toggleHabit(id, day)`. This toggles `day` in `done` (`toggleDone`) and moves `startDay` back if the day is earlier. The write is optimistic, so the check animates at once; marking a habit done also vibrates. Tapping again undoes it.
+3. **Tap to log.** `HabitButton` (on Today and in Shutdown) or a day cell on `/habits` calls `planner.toggleHabit(id, day)`. This toggles `day` in `done` (`toggleDone`) and moves `startDay` back if the day is earlier. The write is optimistic, so the check animates at once; marking a habit done also vibrates.
+   - On Today, `HabitStackCard` lists only due habits not yet done. `onLogged` keeps a just-tapped habit in a `leaving` set for `LEAVE_MS`, so its check shows and `animate-habit-out` plays; then it drops out of the list. The "Habit done" toast's Undo calls `toggleHabit` again, which brings it back.
+   - In Shutdown, tapping again undoes it.
 4. **Stats** are computed from `done` on every render: `currentStreak`, `bestStreak`, `consistency(habit, today, 30)`, `missedLast` (the "Never miss twice" nudge), and `habitCells` for the 7-day row and the 12-week grid.
 5. **Edit, reorder, delete.** `EditHabitDialog` calls `updateHabit` (name, days). The arrows call `moveHabit(id, ±1)` (`planMove` on `order`). Delete asks for confirmation, then calls `removeHabit`; the toast's Undo calls `restoreHabit(snapshot)`, which writes the same document back.
 6. **From a tile.** The edit dialog's **Make it a habit** saves the tile settings, calls `addHabit(titleFromDump(text))`, then `dumps.complete(tileId)`. The toast's Undo calls `removeHabit` and `dumps.restore(tile, 'original')`.

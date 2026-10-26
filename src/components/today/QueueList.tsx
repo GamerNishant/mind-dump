@@ -19,12 +19,11 @@ import { Check, ChevronDown, GripVertical, Pencil, Play, Repeat, RotateCcw, Skip
 import { toast } from 'sonner'
 import { celebrate } from '@/components/celebrate'
 import { Button, focusRing } from '@/components/ui'
-import { BLOCK_MINUTES, CARRY_WARN, SKIP_REASON_LABEL, PRIORITY_LABEL, type Priority, type TodayItem } from '@/domain/plan'
+import { CARRY_WARN, SKIP_REASON_LABEL, PRIORITY_LABEL, type Priority, type TodayItem } from '@/domain/plan'
 import { PRIORITY_CHIP, PriorityFlag } from '@/components/PriorityFlag'
 import { cn } from '@/lib/cn'
 import { hasRoomFor, type Doc } from '@/lib/plan'
 import { preview } from '@/lib/text'
-import { useDumpsStore } from '@/state/DumpsProvider'
 import { usePlanner, type TodayView } from '@/state/PlannerProvider'
 
 type Item = Doc<TodayItem>
@@ -37,7 +36,6 @@ const restrictToVerticalAxisModifier: Modifier = ({ transform }) => ({ ...transf
 /** Start / Done / type changes, shared by the Next card and the queue rows. */
 function useItemActions(view: TodayView) {
   const planner = usePlanner()
-  const dumps = useDumpsStore()
   const navigate = useNavigate()
 
   const undo = (item: Item) => ({ label: 'Undo', onClick: () => void planner.reopen(item.id) })
@@ -63,20 +61,11 @@ function useItemActions(view: TodayView) {
     async completeTask(item: Item) {
       if (!(await planner.complete(item.id))) return
       cheer(item)
-      const { dumpId, routine } = item.data
-      // A recurring tile stays on the board by design, so only offer to clear one-off tiles.
-      if (dumpId && !routine) {
-        toast.success('Done', {
-          description: preview(item.data.title),
-          action: {
-            label: 'Also clear the tile',
-            onClick: () => void dumps.complete(dumpId).then((d) => d && toast.success('Tile cleared')),
-          },
-          cancel: undo(item),
-        })
-      } else {
-        toast.success('Done', { description: preview(item.data.title), action: undo(item) })
-      }
+      // A one-off tile is cleared from the board with it; Undo puts both back.
+      toast.success('Done', {
+        description: planner.clearedTileOf(item.id) ? `${preview(item.data.title)} · cleared from the board too` : preview(item.data.title),
+        action: undo(item),
+      })
     },
 
     async completeBlock(item: Item, minMet: boolean) {
@@ -86,21 +75,10 @@ function useItemActions(view: TodayView) {
       }
       if (!(await planner.complete(item.id, true))) return
       cheer(item)
-      toast.success('Block done', { description: preview(item.data.title), action: undo(item) })
-    },
-
-    async setType(item: Item, type: TodayItem['type']) {
-      if (item.data.type === type) return
-      const others = view.items.filter((i) => i.id !== item.id)
-      if (type === 'block' && !item.data.habit && !hasRoomFor('block', others, view.settings)) {
-        toast(`Today is full — the block cap is ${view.settings.blockCap}`)
-        return
-      }
-      await planner.updateItem(item.id, { type })
-    },
-
-    setMinutes(item: Item, minutes: number) {
-      if (item.data.minutes !== minutes) void planner.updateItem(item.id, { minutes })
+      toast.success('Block done', {
+        description: planner.clearedTileOf(item.id) ? `${preview(item.data.title)} · cleared from the board too` : preview(item.data.title),
+        action: undo(item),
+      })
     },
 
     setField(item: Item, field: 'firstAction' | 'minimum', value: string) {
@@ -271,50 +249,6 @@ function TagChips({ item, priority }: { item: Item; priority?: Priority | null }
   )
 }
 
-function TypeToggle({ item, onChange }: { item: Item; onChange: (type: TodayItem['type']) => void }) {
-  const isBlock = item.data.type === 'block'
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(isBlock ? 'task' : 'block')}
-      aria-label={`Type: ${isBlock ? 'Block' : 'Task'}. Switch to ${isBlock ? 'Task' : 'Block'}`}
-      title={`Switch to ${isBlock ? 'Task' : 'Block'}`}
-      className={cn(chip, 'border transition', focusRing, isBlock ? 'border-accent/30 bg-accent-soft text-accent' : 'border-line bg-card text-ink-muted hover:border-line-strong hover:text-ink')}
-    >
-      {isBlock ? 'Block' : 'Task'}
-    </button>
-  )
-}
-
-function MinutesPicker({ item, onChange }: { item: Item; onChange: (minutes: number) => void }) {
-  const options: number[] = [...BLOCK_MINUTES]
-  if (!options.includes(item.data.minutes)) options.unshift(item.data.minutes)
-  return (
-    <div role="group" aria-label="Block length" className="inline-flex rounded-lg border border-line bg-card p-0.5">
-      {options.map((m) => {
-        const active = m === item.data.minutes
-        return (
-          <button
-            key={m}
-            type="button"
-            aria-pressed={active}
-            aria-label={`${m} minutes`}
-            onClick={() => onChange(m)}
-            className={cn(
-              'h-7 min-w-9 rounded-md px-1.5 text-xs font-medium tabular-nums transition pointer-coarse:h-8',
-              focusRing,
-              active ? 'bg-accent-solid text-accent-ink' : 'text-ink-muted hover:bg-sunken hover:text-ink',
-            )}
-          >
-            {m}
-            <span aria-hidden>m</span>
-          </button>
-        )
-      })}
-    </div>
-  )
-}
-
 function MinMetPrompt({ onAnswer, onCancel }: { onAnswer: (met: boolean) => void; onCancel: () => void }) {
   const ref = useRef<HTMLDivElement>(null)
   const id = useId()
@@ -355,7 +289,7 @@ export function NextCard({ view, onSkip, onEdit }: { view: TodayView; onSkip: (i
   const running = view.focus?.data.itemId === item.id
 
   return (
-    <section aria-labelledby="next-heading" className="animate-fade-up rounded-3xl border border-accent/25 bg-card bg-linear-to-br from-accent-soft/70 via-card to-card p-5 shadow-md shadow-accent/10 sm:p-6">
+    <section aria-labelledby="next-heading" data-today-item={item.id} className="animate-fade-up rounded-3xl border border-accent/25 bg-card p-5 shadow-sm sm:p-6">
       <div className="flex flex-wrap items-center gap-1.5">
         <h2 id="next-heading" className="mr-1 text-xs font-semibold tracking-wide text-accent uppercase">
           Next
@@ -364,25 +298,16 @@ export function NextCard({ view, onSkip, onEdit }: { view: TodayView; onSkip: (i
           {isBlock ? `Block · ${data.minutes} min` : 'Task'}
         </span>
         <TagChips item={item} priority={item.data.dumpId ? view.metas.get(item.data.dumpId)?.priority : null} />
-        <Button variant="ghost" size="icon-sm" className="ml-auto pointer-coarse:size-10" onClick={() => onEdit(item)} aria-label={`Edit: ${preview(data.title, 60)}`} title="Edit, set priority or remove">
+        <Button variant="ghost" size="icon-sm" className="ml-auto pointer-coarse:size-10" onClick={() => onEdit(item)} aria-label={`Edit or remove: ${preview(data.title, 80)}`} title="Edit, set priority or remove">
           <Pencil aria-hidden />
         </Button>
       </div>
 
       <p className="mt-3 text-xl leading-snug font-semibold tracking-tight break-words text-ink sm:text-2xl">{data.title}</p>
 
-      <div className="mt-4">
-        <p className="px-1.5 text-xs font-medium text-ink-subtle">First action</p>
-        <InlineField
-          large
-          label="First action"
-          value={data.firstAction}
-          placeholder="Pen in hand, open p.14"
-          onSave={(v) => actions.setField(item, 'firstAction', v)}
-        />
-      </div>
-      <div className="mt-1">
-        <InlineField label="Minimum" value={data.minimum} placeholder="5 bullet notes" onSave={(v) => actions.setField(item, 'minimum', v)} />
+      <div className="mt-2 -ml-1.5">
+        <InlineField label="First action" value={data.firstAction} placeholder="Pen in hand, open p.14" onSave={(v) => actions.setField(item, 'firstAction', v)} />
+        {isBlock && <InlineField label="Minimum" value={data.minimum} placeholder="5 bullet notes" onSave={(v) => actions.setField(item, 'minimum', v)} />}
       </div>
 
       <div className="mt-5 flex flex-wrap gap-2">
@@ -392,13 +317,13 @@ export function NextCard({ view, onSkip, onEdit }: { view: TodayView; onSkip: (i
             {running ? 'Open block' : 'Start'}
           </Button>
         ) : (
-          <Button size="lg" onClick={() => void actions.completeTask(item)} className="min-w-32 flex-1 sm:flex-none">
+          <Button size="lg" onClick={() => void actions.completeTask(item)} aria-label={`Done: ${preview(data.title, 80)}`} className="min-w-32 flex-1 sm:flex-none">
             <Check aria-hidden />
             Done
           </Button>
         )}
         {!running && (
-          <Button size="lg" variant="secondary" onClick={() => onSkip(item)}>
+          <Button size="lg" variant="secondary" onClick={() => onSkip(item)} aria-label={`Skip: ${preview(data.title, 80)}`}>
             <SkipForward aria-hidden />
             Skip
           </Button>
@@ -416,7 +341,9 @@ export function QueueList({ view, onSkip, onEdit }: { view: TodayView; onSkip: (
   const [confirmingId, setConfirmingId] = useState<string | null>(null)
   const [closedOpen, setClosedOpen] = useState(false)
 
-  const open = useMemo(() => view.items.filter((i) => i.data.status === 'open'), [view.items])
+  // Next has its own card above, so the list shows what comes after it.
+  const nextId = view.next?.id ?? null
+  const open = useMemo(() => view.items.filter((i) => i.data.status === 'open' && i.id !== nextId), [view.items, nextId])
   const closed = useMemo(() => view.items.filter((i) => i.data.status !== 'open'), [view.items])
   const ids = useMemo(() => open.map((i) => i.id), [open])
   const byId = useMemo(() => new Map(open.map((i) => [i.id, i])), [open])
@@ -442,28 +369,29 @@ export function QueueList({ view, onSkip, onEdit }: { view: TodayView; onSkip: (
     const from = ids.indexOf(String(active.id))
     const to = ids.indexOf(String(over.id))
     if (from < 0 || to < 0) return
-    void planner.reorder(view.today, String(active.id), arrayMove(ids, from, to))
+    const moved = arrayMove(ids, from, to)
+    void planner.reorder(view.today, String(active.id), nextId ? [nextId, ...moved] : moved)
   }
+
+  if (open.length === 0 && closed.length === 0) return null
 
   return (
     <section aria-labelledby="queue-heading">
-      <div className="flex items-baseline gap-2">
-        <h2 id="queue-heading" className="text-base font-semibold tracking-tight">
+      {open.length > 0 && (
+        <div className="flex items-baseline gap-2">
+          <h2 id="queue-heading" className="text-sm font-semibold tracking-tight text-ink-muted">
+            Then
+          </h2>
+          <span className="text-xs text-ink-subtle tabular-nums">{open.length}</span>
+        </div>
+      )}
+      {open.length === 0 && (
+        <h2 id="queue-heading" className="sr-only">
           Queue
         </h2>
-        <span className="text-xs text-ink-subtle tabular-nums">
-          {open.length} open
-          {open.length > 1 && (
-            <span className="max-sm:hidden"> · drag the grip to reorder</span>
-          )}
-        </span>
-      </div>
+      )}
 
-      {open.length === 0 ? (
-        <p className="mt-3 rounded-2xl border border-dashed border-line px-4 py-5 text-center text-sm text-ink-muted">
-          Queue clear. Nothing open.
-        </p>
-      ) : (
+      {open.length === 0 ? null : (
         <DndContext
           sensors={sensors}
           collisionDetection={closestCenter}
@@ -479,12 +407,11 @@ export function QueueList({ view, onSkip, onEdit }: { view: TodayView; onSkip: (
         >
           <SortableContext items={ids} strategy={verticalListSortingStrategy}>
             <ol aria-label="Today's queue" className="mt-3 flex flex-col gap-2">
-              {open.map((item, index) => (
+              {open.map((item) => (
                 <QueueRow
                   key={item.id}
                   item={item}
                   priority={item.data.dumpId ? view.metas.get(item.data.dumpId)?.priority : null}
-                  isNext={index === 0}
                   running={view.focus?.data.itemId === item.id}
                   confirming={confirmingId === item.id}
                   actions={actions}
@@ -536,7 +463,6 @@ type Actions = ReturnType<typeof useItemActions>
 interface QueueRowProps {
   item: Item
   priority?: Priority | null
-  isNext: boolean
   running: boolean
   confirming: boolean
   actions: Actions
@@ -547,7 +473,7 @@ interface QueueRowProps {
   onEdit: () => void
 }
 
-function QueueRow({ item, priority, isNext, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip, onEdit }: QueueRowProps) {
+function QueueRow({ item, priority, running, confirming, actions, onDone, onAnswer, onCancelConfirm, onSkip, onEdit }: QueueRowProps) {
   const { attributes, listeners, setNodeRef, setActivatorNodeRef, transform, transition, isDragging } = useSortable({ id: item.id })
   const { data } = item
   const isBlock = data.type === 'block'
@@ -569,6 +495,7 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
     <li
       ref={setNodeRef}
       data-item-id={item.id}
+      data-today-item={item.id}
       style={{ transform: CSS.Translate.toString(transform), transition }}
       className={cn(
         'relative rounded-2xl border bg-card transition-[box-shadow,border-color]',
@@ -576,7 +503,7 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
         running && 'border-accent/40',
       )}
     >
-      <div className="flex items-start gap-0.5 py-1.5 pr-2 pl-0.5 sm:pr-3">
+      <div className="flex items-center gap-0.5 py-1 pr-1.5 pl-0.5 sm:pr-2">
         <button
           type="button"
           ref={setActivatorNodeRef}
@@ -584,7 +511,7 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
           {...listeners}
           aria-label={`Reorder: ${title}`}
           className={cn(
-            'tile-touch grid h-11 w-7 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-subtle hover:bg-sunken hover:text-ink active:cursor-grabbing',
+            'tile-touch grid h-11 w-7 shrink-0 cursor-grab touch-none place-items-center rounded-lg text-ink-subtle/60 hover:bg-sunken hover:text-ink active:cursor-grabbing',
             focusRing,
           )}
         >
@@ -604,48 +531,43 @@ function QueueRow({ item, priority, isNext, running, confirming, actions, onDone
           </span>
         </button>
 
-        <div className="min-w-0 flex-1 py-1.5">
+        <div className="min-w-0 flex-1 py-1">
           <button
             type="button"
             onClick={onEdit}
             className={cn('-mx-1 block max-w-full rounded-md px-1 text-left hover:bg-sunken', focusRing)}
-            aria-label={`Edit: ${title}`}
+            aria-label={`Edit or remove: ${title}`}
+            title="Edit, set priority or remove"
           >
-            <span className="line-clamp-2 text-[15px] leading-snug break-words text-ink">
-              {isNext && <span className="sr-only">Next: </span>}
-              {data.title}
-            </span>
+            <span className="line-clamp-2 text-[15px] leading-snug break-words text-ink">{data.title}</span>
+            {(isBlock || data.firstAction) && (
+              <span className="mt-0.5 block truncate text-xs text-ink-subtle">
+                {isBlock && `Block · ${data.minutes} min`}
+                {isBlock && data.firstAction && ' · '}
+                {data.firstAction}
+              </span>
+            )}
           </button>
-
-          <div className="mt-1 flex flex-wrap gap-x-1 gap-y-0">
-            <InlineField label="First action" value={data.firstAction} placeholder="One physical first step" onSave={(v) => actions.setField(item, 'firstAction', v)} />
-            <InlineField label="Minimum" value={data.minimum} placeholder="Output floor for a bad day" onSave={(v) => actions.setField(item, 'minimum', v)} />
-          </div>
-
-          <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
-            <TypeToggle item={item} onChange={(type) => void actions.setType(item, type)} />
-            {isBlock && <MinutesPicker item={item} onChange={(m) => actions.setMinutes(item, m)} />}
-            <TagChips item={item} priority={priority} />
-            <div className="ml-auto flex items-center gap-1">
-              {isBlock && (
-                <Button size="sm" variant={isNext ? 'primary' : 'secondary'} onClick={() => void actions.start(item)} className="pointer-coarse:h-10">
-                  <Play aria-hidden />
-                  {running ? 'Open' : 'Start'}
-                </Button>
-              )}
-              <Button size="icon-sm" variant="ghost" onClick={onEdit} aria-label={`Edit or remove: ${title}`} title="Edit, set priority or remove" className="pointer-coarse:size-10">
-                <Pencil aria-hidden />
-              </Button>
-              {!running && (
-                <Button size="sm" variant="ghost" onClick={onSkip} aria-label={`Skip: ${title}`} className="pointer-coarse:h-10">
-                  <SkipForward aria-hidden />
-                  Skip
-                </Button>
-              )}
+          {(priority || data.routine || data.habit || data.carryCount > 0) && (
+            <div className="mt-1 flex flex-wrap items-center gap-1.5">
+              <TagChips item={item} priority={priority} />
             </div>
-          </div>
-
+          )}
           {confirming && <MinMetPrompt onAnswer={answer} onCancel={cancelConfirm} />}
+        </div>
+
+        <div className="flex shrink-0 items-center">
+          {isBlock && (
+            <Button size="sm" variant="secondary" onClick={() => void actions.start(item)} className="pointer-coarse:h-10">
+              <Play aria-hidden />
+              {running ? 'Open' : 'Start'}
+            </Button>
+          )}
+          {!running && (
+            <Button size="icon-sm" variant="ghost" onClick={onSkip} aria-label={`Skip: ${title}`} title="Skip" className="text-ink-subtle pointer-coarse:size-10">
+              <SkipForward aria-hidden />
+            </Button>
+          )}
         </div>
       </div>
     </li>

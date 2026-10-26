@@ -9,6 +9,7 @@ import {
   type PlanSettings,
   type TileMeta,
   type TodayItem,
+  WIND_DOWN_HOUR,
 } from '@/domain/plan'
 import type { PlannerDocInput } from '@/data/types'
 import { POSITION_STEP } from './position'
@@ -340,6 +341,16 @@ export function routineCreates(
   return creates
 }
 
+/**
+ * Wind-down time: from WIND_DOWN_HOUR until the planner day ends (the small hours still belong
+ * to it). Before that, Shutdown stays out of sight so an early clear queue doesn't nudge an
+ * early close.
+ */
+export function isWindDown(now: Date, dayStartHour: number): boolean {
+  const hour = now.getHours()
+  return hour >= WIND_DOWN_HOUR || hour < dayStartHour
+}
+
 // ---- hour log ---------------------------------------------------------------------------
 
 /** Clock hours shown in the strip for a day, starting at the day-start hour (24 cells). */
@@ -347,21 +358,30 @@ export function stripHours(startHour: number): number[] {
   return Array.from({ length: 24 }, (_, i) => (startHour + i) % 24)
 }
 
+/** Minutes of focus inside a clock hour that count as studying in that hour. */
+export const MIN_HOUR_OVERLAP_MIN = 10
+
 /**
- * Hours a session mostly covered (≥ 30 min of the hour), for auto-filling Study cells.
+ * Hours a session touched for at least MIN_HOUR_OVERLAP_MIN minutes, for auto-filling Study
+ * cells. A 50-minute block from 10:35 to 11:25 fills both 10 and 11. A short session that
+ * reaches the threshold in no hour still fills the hour it spent most of its time in.
  * Returns clock hours paired with the planner day each falls in.
  */
 export function coveredHours(start: Date, end: Date, startHour: number): Array<{ day: string; hour: number }> {
-  const out: Array<{ day: string; hour: number }> = []
+  const spans: Array<{ day: string; hour: number; ms: number }> = []
   const cursor = new Date(start)
   cursor.setMinutes(0, 0, 0)
   while (cursor < end) {
     const next = new Date(cursor.getTime() + 3_600_000)
-    const overlap = Math.min(next.getTime(), end.getTime()) - Math.max(cursor.getTime(), start.getTime())
-    if (overlap >= 30 * 60_000) out.push({ day: planDay(cursor, startHour), hour: cursor.getHours() })
+    const ms = Math.min(next.getTime(), end.getTime()) - Math.max(cursor.getTime(), start.getTime())
+    if (ms > 0) spans.push({ day: planDay(cursor, startHour), hour: cursor.getHours(), ms })
     cursor.setTime(next.getTime())
   }
-  return out
+  const covered = spans.filter((s) => s.ms >= MIN_HOUR_OVERLAP_MIN * 60_000)
+  if (!covered.length && end.getTime() - start.getTime() >= 5 * 60_000) {
+    covered.push(spans.reduce((a, b) => (b.ms > a.ms ? b : a)))
+  }
+  return covered.map(({ day, hour }) => ({ day, hour }))
 }
 
 // ---- focus --------------------------------------------------------------------------------
