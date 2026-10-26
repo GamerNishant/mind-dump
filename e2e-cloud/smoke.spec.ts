@@ -32,9 +32,9 @@ test('cloud: sign up, dump, clear, restore, sync, delete, sign out/in', async ({
   await page.goto('today')
   await expect(page.getByRole('heading', { name: 'Today', level: 1 })).toBeVisible({ timeout: 20_000 })
   await expect(page.getByText('one-time setup', { exact: false })).toHaveCount(0)
-  await expect(page.getByRole('list', { name: "Today's queue" }).getByText(text)).toBeVisible()
+  await expect(page.locator('[data-today-item]').filter({ hasText: text })).toBeVisible()
   await page.reload()
-  await expect(page.getByRole('list', { name: "Today's queue" }).getByText(text)).toBeVisible({ timeout: 20_000 })
+  await expect(page.locator('[data-today-item]').filter({ hasText: text })).toBeVisible({ timeout: 20_000 })
   await page.goto('./')
   await expect(tile).toBeVisible()
 
