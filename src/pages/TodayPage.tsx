@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link } from 'react-router'
-import { ArrowRight, RefreshCw, Sunrise, Timer } from 'lucide-react'
+import { ArrowRight, Flame, RefreshCw, Sunrise, Timer } from 'lucide-react'
 import { HabitStackCard } from '@/components/habits/HabitStackCard'
 import { AddItemForm } from '@/components/today/AddItemForm'
 import { EditItemDialog } from '@/components/today/EditItemDialog'
@@ -15,8 +15,9 @@ import { Button, buttonClass, EmptyState, focusRing } from '@/components/ui'
 import type { FocusSession, TodayItem } from '@/domain/plan'
 import { useNow } from '@/hooks/useNow'
 import { cn } from '@/lib/cn'
+import { compassOf, fireStats } from '@/lib/compass'
 import { focusRemainingMs, formatClock, isWindDown, type Doc } from '@/lib/plan'
-import { usePlanner, useToday } from '@/state/PlannerProvider'
+import { usePlanner, usePlannerState, useToday } from '@/state/PlannerProvider'
 
 const pageClass = 'mx-auto w-full max-w-3xl px-4 pt-6 pb-[max(6rem,env(safe-area-inset-bottom))] sm:px-6 sm:pt-8'
 
@@ -72,6 +73,7 @@ export function TodayPage() {
           <RestartCard view={view} />
           <MorningCheckCard view={view} />
           <HabitStackCard view={view} />
+          <SparkNudge view={view} />
 
           {empty ? (
             <EmptyState
@@ -138,6 +140,27 @@ function FocusBanner({ session }: { session: FocusSession }) {
         </span>
       </Link>
     </div>
+  )
+}
+
+/** Once the fire's block is done today, one quiet line asks for the check-in (Compass). */
+function SparkNudge({ view }: { view: ReturnType<typeof useToday> }) {
+  const { docs } = usePlannerState()
+  const fire = useMemo(() => compassOf(docs).fire, [docs])
+  if (!fire?.dumpId || fireStats(fire, view.today).loggedToday) return null
+  if (!view.items.some((i) => i.data.dumpId === fire.dumpId && i.data.status === 'done')) return null
+  return (
+    <Link
+      to="/compass"
+      className={cn(
+        'flex min-h-11 items-center gap-2 rounded-2xl border border-orange-500/30 bg-orange-500/5 px-4 text-sm text-ink transition hover:border-orange-500/60',
+        focusRing,
+      )}
+    >
+      <Flame className="size-4 shrink-0 text-orange-600 dark:text-orange-400" aria-hidden />
+      <span className="min-w-0 flex-1 truncate">How did “{fire.title}” feel? Log today’s spark</span>
+      <ArrowRight className="size-4 shrink-0 text-ink-subtle" aria-hidden />
+    </Link>
   )
 }
 

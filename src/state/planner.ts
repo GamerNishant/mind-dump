@@ -10,7 +10,10 @@ import {
   SHRUNK_MINUTES,
   STARTER_MINUTES,
   type Block1Result,
+  type Candidate,
+  type Compass,
   type DayPlan,
+  type Fire,
   type FocusSession,
   type Habit,
   type HourValue,
@@ -18,8 +21,14 @@ import {
   type Rule,
   type SkipReason,
   type SkipTo,
+  type Spark,
   type TileMeta,
   type TodayItem,
+  type Verdict,
+  FIRE_DAYS,
+  MAX_ANSWER,
+  MAX_CANDIDATES,
+  MAX_FIRE_TEXT,
 } from '@/domain/plan'
 import type { PlannerDocInput } from '@/data/types'
 import { newId } from '@/lib/id'
@@ -31,6 +40,7 @@ import {
   dayPlanOf,
   docsOfKind,
   routineCreates,
+  routineItemId,
   seedRuleId,
   singleton,
   floorMet,
@@ -49,6 +59,7 @@ import {
   blocksDone,
   type Doc,
 } from '@/lib/plan'
+import { compassId, compassOf, fireStats, upsertSpark } from '@/lib/compass'
 import { habitsOf, normalizeHabit, toggleDone } from '@/lib/habits'
 import { cleanTag, mergeTags } from '@/lib/hours'
 import { planMove, POSITION_STEP } from '@/lib/position'
@@ -570,6 +581,122 @@ export class Planner {
     return this.putHabit(doc.id, doc.data, "Couldn't restore the habit")
   }
 
+  // ---- Compass: find your fire, the Spark experiment -------------------------------------------
+
+  compass(): Compass {
+    return compassOf(this.docs)
+  }
+
+  private putCompass(patch: Partial<Compass>, error = "Couldn't save your Compass") {
+    const id = singleton(this.docs, KIND.compass, null)?.id ?? compassId(this.userId)
+    return this.store.put({ id, kind: KIND.compass, day: null, data: { ...this.compass(), ...patch } }, error)
+  }
+
+  saveAnswers(answers: Record<string, string>): Promise<boolean> {
+    const clean: Record<string, string> = {}
+    for (const [k, v] of Object.entries(answers)) if (v.trim()) clean[k] = v.slice(0, MAX_ANSWER)
+    return this.putCompass({ answers: clean })
+  }
+
+  saveCandidates(candidates: Candidate[]): Promise<boolean> {
+    return this.putCompass({ candidates: candidates.slice(0, MAX_CANDIDATES).map((c) => ({ ...c, title: clip(c.title) })) })
+  }
+
+  /**
+   * Commit to a direction: a recurring daily block tile (so Today gets a block every day through
+   * the normal routine machinery, outside the caps), today's block right away, and a fresh
+   * Spark experiment. A fire that was running is archived with `previous` as its verdict.
+   */
+  async lightFire(
+    input: Pick<Fire, 'title' | 'why' | 'output' | 'minutes' | 'firstAction' | 'cue' | 'runnerUp'>,
+    previous: Verdict = 'switch',
+  ): Promise<boolean> {
+    const title = clip(input.title)
+    if (!title) return false
+    const old = this.compass().fire
+    const past = old ? [this.archived(old, previous), ...this.compass().past] : this.compass().past
+    if (old?.dumpId) await this.retireFireTile(old.dumpId)
+    const created = await this.dumps.addMany([title])
+    const dumpId = created?.[0]?.id ?? null
+    const today = this.today()
+    if (dumpId) {
+      await this.store.put(
+        this.metaDoc({
+          ...this.meta(dumpId),
+          repeat: [...EVERY_DAY],
+          defaultType: 'block',
+          defaultMinutes: input.minutes,
+          defaultMinimum: '10 minutes on it',
+          priority: 'high',
+        }),
+      )
+      await this.prepareRoutines(today)
+      const item = this.item(routineItemId(dumpId, today))
+      if (item && input.firstAction.trim()) await this.putItem(item, { firstAction: clip(input.firstAction) })
+    }
+    const fire: Fire = {
+      title,
+      why: clip(input.why),
+      output: clip(input.output),
+      minutes: input.minutes,
+      firstAction: clip(input.firstAction),
+      cue: clip(input.cue),
+      runnerUp: input.runnerUp ? clip(input.runnerUp) : null,
+      startDay: today,
+      lengthDays: FIRE_DAYS,
+      dumpId,
+      sparks: [],
+    }
+    return this.putCompass({ fire, past: past.slice(0, 20) }, "Couldn't start the experiment")
+  }
+
+  /** The check-in after a session. One per day; logging again replaces it. */
+  logSpark(spark: Spark): Promise<boolean> {
+    const fire = this.compass().fire
+    if (!fire) return Promise.resolve(false)
+    const clean: Spark = {
+      day: spark.day,
+      minutes: Math.max(0, Math.min(600, Math.round(spark.minutes))),
+      energy: Math.max(1, Math.min(5, Math.round(spark.energy))),
+      flow: spark.flow,
+      note: clip(spark.note),
+    }
+    return this.putCompass({ fire: { ...fire, sparks: upsertSpark(fire.sparks, clean) } }, "Couldn't save the check-in")
+  }
+
+  /** Keep going: archive this run and start another of `days` (same tile, optionally new minutes). */
+  async extendFire(verdict: Verdict, days: number, minutes?: number): Promise<boolean> {
+    const fire = this.compass().fire
+    if (!fire) return false
+    const nextMinutes = minutes ?? fire.minutes
+    if (fire.dumpId && nextMinutes !== fire.minutes) await this.setTileMeta(fire.dumpId, { defaultMinutes: nextMinutes })
+    return this.putCompass({
+      fire: { ...fire, startDay: this.today(), lengthDays: days, minutes: nextMinutes, sparks: [] },
+      past: [this.archived(fire, verdict), ...this.compass().past].slice(0, 20),
+    })
+  }
+
+  /** Stop the experiment: archive it, and its daily block leaves Today and the board. */
+  async endFire(verdict: Verdict): Promise<boolean> {
+    const fire = this.compass().fire
+    if (!fire) return false
+    if (fire.dumpId) await this.retireFireTile(fire.dumpId)
+    return this.putCompass({ fire: null, past: [this.archived(fire, verdict), ...this.compass().past].slice(0, 20) })
+  }
+
+  private archived(fire: Fire, verdict: Verdict) {
+    const stats = fireStats(fire, this.today())
+    return { title: fire.title, startDay: fire.startDay, endDay: this.today(), verdict, meter: stats.meter ?? 0, sparks: stats.sessions }
+  }
+
+  private async retireFireTile(dumpId: string): Promise<void> {
+    for (const item of itemsForDay(this.docs, this.today())) {
+      if (item.data.dumpId === dumpId && item.data.status === 'open') await this.dismiss(item.id)
+    }
+    await this.setTileMeta(dumpId, { repeat: null })
+    if (this.dumps.getState().active.some((d) => d.id === dumpId)) await this.dumps.complete(dumpId)
+  }
+
   // ---- Day plan: Morning Check, Shutdown, Restart -------------------------------------------
 
   dayPlan(day: string): DayPlan {
@@ -722,3 +849,5 @@ export class Planner {
     return this.store.put({ id, kind: KIND.settings, day: null, data: { ...this.settings(), ...patch } }, "Couldn't save settings")
   }
 }
+
+const clip = (text: string) => text.replace(/\s+/g, ' ').trim().slice(0, MAX_FIRE_TEXT)

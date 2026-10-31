@@ -39,7 +39,7 @@ flowchart TD
   P --> D["DumpsProvider key=user.id"]
   D --> PP["PlannerProvider: store, Planner, RolloverRunner"]
   PP --> H[AppHeader + LocalModeBanner + MorningLanding]
-  PP --> O["Outlet: / board, /today, /habits, /focus, /shutdown, /rules, /history"]
+  PP --> O["Outlet: / board, /today, /habits, /compass, /focus, /shutdown, /rules, /history"]
   Routes --> X["* → Navigate to /"]
 ```
 
@@ -562,3 +562,38 @@ Code: [src/lib/habits.ts](src/lib/habits.ts) (pure rules), `Planner` habit metho
   - `FocusPage`'s end dialog: big, when the minimum was met.
 - `celebrate` appends a set of `.confetti-piece` spans, animates each with `element.animate`, and removes it when the animation finishes. It returns early if reduced motion is preferred or `Element.animate` doesn't exist.
 - `TodayHeader` shows `greetingFor(hour, dayStartHour)` with the user's first name, and `momentumLine(done, open)`. "Done" counts finished items and habits; "open" counts open items and habits still due.
+
+### 7.17 Compass
+
+Code: [src/lib/compass.ts](src/lib/compass.ts) (pure rules), `Planner` compass methods in [src/state/planner.ts](src/state/planner.ts), [CompassPage.tsx](src/pages/CompassPage.tsx), [components/compass/](src/components/compass/).
+
+1. **Read.** `CompassPage` reads `usePlannerState().docs` and calls `compassOf(docs)`, which takes the newest `compass` document (`singleton`) and runs `normalizeCompass` (defaults and size caps). Loading, error and setup states match the other planner pages.
+2. **Right now.** `RightNow` builds a `NowInput` from `useToday()`: open, non-light-routine items in queue order; up to 3 high-priority tiles not in Today; and the fire with `loggedToday`. `pickNow` returns `{ reset, picks }`.
+   - "Start in 5" mounts `Countdown`, which ticks once a second, then calls `go(pick)`:
+     - a reset → `navigate('/')` for "Empty your head", or a toast;
+     - discover → open the wizard;
+     - a pick with no Today item → `planner.addFromDump`;
+     - a block (when no block is running) → `planner.startFocus(itemId, minutes <= 10 ? 'shrink' : 'full')` → `/focus`;
+     - otherwise → `/today`.
+3. **Find your fire.** The page switches `mode` to `find` and renders `FindFire`, a local `step` state machine (intro → prompt 0–7 → candidates → score i → duel i → ranking → coin → commit).
+   - "Next" on a prompt calls `planner.saveAnswers`, and every change to the options or their scores calls `planner.saveCandidates`, so leaving midway loses nothing. Reopening goes straight to the options step if any exist.
+   - Re-scoring resets duel results. The duel's pairs are memoised on the scores, so recording a win doesn't reshuffle them.
+4. **Commit.** `CommitStep` calls `planner.lightFire(input, previous)`:
+   1. archive any running fire (`archived` + `retireFireTile`);
+   2. `dumps.addMany([title])`;
+   3. write `tile_meta` (repeat every day, block, minutes, high priority);
+   4. `prepareRoutines(today)`, then set the routine item's `firstAction`;
+   5. write the `compass` document with the new `fire`.
+
+   Then confetti, and the wizard closes.
+5. **Each day.** The rollover (`routineCreates`) adds the fire's block to Today. Doing it uses the normal focus flow. `SparkNudge` on Today appears once that item is done and no spark is logged.
+6. **Check-in.** `SparkCheck` → `planner.logSpark` (clamped: energy 1–5, minutes 0–600) → `upsertSpark` (one per day, at most 60 kept). `FireCard` recomputes `fireStats` on every render.
+7. **Verdict.** It shows when `stats.finished`, or on "Review early" (which changes nothing until a button is pressed):
+   - keep → `extendFire('keep', 30)`;
+   - restart → `extendFire('restart', 14, ≤15 min)`;
+   - reshape → "14 more days as is" (`extendFire`), or the commit form prefilled with the title;
+   - switch → the commit form prefilled with the runner-up (calls `lightFire(…, previous)`).
+
+   "End it" (after confirmation) calls `endFire(verdict)`: today's open fire item is dismissed (`not_relevant`), the tile's `repeat` is cleared and the tile goes to History.
+8. **Errors.** Every write goes through `PlannerStore.put`: it is optimistic, and a failure rolls it back with a toast ("Couldn't save your Compass", "Couldn't save the check-in", …). The backup (`exportData`) includes the `compass` document, because it is in `ALL_KINDS`.
+

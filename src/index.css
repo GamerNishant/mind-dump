@@ -12,6 +12,9 @@
   --animate-fade-up: fade-up 320ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-pop: pop 180ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
   --animate-check: check-pop 320ms cubic-bezier(0.2, 0.8, 0.2, 1.4) both;
+  /* Compass: the coin test, and the 5-4-3-2-1 countdown. */
+  --animate-coin: coin-flip 1400ms cubic-bezier(0.3, 0.1, 0.3, 1) both;
+  --animate-count: count-pop 1000ms ease-out both;
 
   @keyframes tile-in {
     from { opacity: 0; transform: translateY(6px) scale(0.97); }
@@ -28,6 +31,17 @@
     0% { transform: scale(0.6); }
     60% { transform: scale(1.15); }
     100% { transform: scale(1); }
+  }
+  @keyframes coin-flip {
+    from { transform: translateY(0) rotateX(0); }
+    45% { transform: translateY(-90px) rotateX(1080deg); }
+    to { transform: translateY(0) rotateX(1800deg); }
+  }
+  @keyframes count-pop {
+    0% { opacity: 0; transform: scale(1.6); }
+    25% { opacity: 1; transform: scale(1); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: scale(0.9); }
   }
   @keyframes pop {
     from { opacity: 0; transform: translateY(-4px) scale(0.97); }

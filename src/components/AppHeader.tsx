@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef, useState } from 'react'
 import { Link, NavLink } from 'react-router'
-import { Cloud, Download, Flame, HardDrive, History, LayoutGrid, LogOut, Monitor, Moon, Sun } from 'lucide-react'
+import { Cloud, Compass, Download, Flame, HardDrive, History, LayoutGrid, LogOut, Monitor, Moon, Sun } from 'lucide-react'
 import { toast } from 'sonner'
 import { useAuth, useUser } from '@/auth/AuthProvider'
 import { backend } from '@/data/backend'
@@ -17,7 +17,8 @@ export function AppHeader() {
     <header className="sticky top-0 z-30 border-b border-line/70 bg-canvas/75 pt-[env(safe-area-inset-top)] backdrop-blur-xl">
       <div className="mx-auto flex h-14 max-w-6xl items-center gap-3 px-4 sm:px-6">
         <Link to="/" className={cn('-ml-1 rounded-lg px-1 py-0.5', focusRing)} aria-label="Mind Dump — board">
-          <Logo />
+          {/* On the narrowest phones the mark alone leaves room for every nav icon. */}
+          <Logo className="max-[400px]:[&>span]:sr-only" />
         </Link>
         <nav className="ml-auto flex min-w-0 items-center gap-1 sm:gap-1.5" aria-label="Main">
           <NavLink to="/" end className={navClass}>
@@ -26,6 +27,10 @@ export function AppHeader() {
           </NavLink>
           <TodayLink />
           <HabitsLink />
+          <NavLink to="/compass" className={navClass}>
+            <Compass aria-hidden />
+            <span className="max-sm:sr-only">Compass</span>
+          </NavLink>
           <NavLink to="/history" className={navClass}>
             <History aria-hidden />
             <span className="max-sm:sr-only">History</span>
@@ -38,7 +43,7 @@ export function AppHeader() {
 }
 
 const navClass = ({ isActive }: { isActive: boolean }) =>
-  buttonClass(isActive ? 'secondary' : 'ghost', 'sm', cn('relative h-9 max-sm:px-2.5', isActive && 'text-accent'))
+  buttonClass(isActive ? 'secondary' : 'ghost', 'sm', cn('relative h-9 max-sm:px-2', isActive && 'text-accent'))
 
 /** "Today" with a count of open items and a pulsing dot while a focus block runs. */
 function TodayLink() {

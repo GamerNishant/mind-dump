@@ -8,6 +8,7 @@ import { FocusAlarm } from '@/components/today/FocusAlarm'
 import { Splash } from '@/components/ui'
 import { AuthPage, ForgotPasswordPage, ResetPasswordPage } from '@/pages/AuthPages'
 import { BoardPage } from '@/pages/BoardPage'
+import { CompassPage } from '@/pages/CompassPage'
 import { FocusPage } from '@/pages/FocusPage'
 import { HabitsPage } from '@/pages/HabitsPage'
 import { HistoryPage } from '@/pages/HistoryPage'
@@ -116,6 +117,7 @@ export default function App() {
               <Route index element={<BoardPage />} />
               <Route path="today" element={<TodayPage />} />
               <Route path="habits" element={<HabitsPage />} />
+              <Route path="compass" element={<CompassPage />} />
               <Route path="focus" element={<FocusPage />} />
               <Route path="shutdown" element={<ShutdownPage />} />
               <Route path="rules" element={<RulesPage />} />

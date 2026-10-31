@@ -30,6 +30,7 @@ Mind Dump is a single-page web app for emptying your head and then doing the rig
 | **Edit a queue item** (name, priority, Block/Task, length, first action, minimum) or **remove it** when it's no longer relevant, optionally clearing its tile | [EditItemDialog.tsx](src/components/today/EditItemDialog.tsx), `Planner.retitle` / `Planner.dismiss` |
 | **Sunrise theme** and small rewards: warm colours, a greeting with a kind progress line, and confetti when you finish things | [src/index.css](src/index.css), [celebrate.ts](src/components/celebrate.ts), [lib/greeting.ts](src/lib/greeting.ts) |
 | **Download my data**: a JSON backup of everything, from the account menu | [src/data/exportData.ts](src/data/exportData.ts), [AppHeader.tsx](src/components/AppHeader.tsx) |
+| **Compass** (`/compass`): "What should I do right now?" (one answer in three taps) and "Find your fire" (a guided discovery, then a 14-day Spark experiment with check-ins, a Fire meter and a verdict) (see §8.9) | [CompassPage.tsx](src/pages/CompassPage.tsx), [components/compass/](src/components/compass/), [lib/compass.ts](src/lib/compass.ts) |
 
 ## 2. Tech stack
 
@@ -38,7 +39,7 @@ Mind Dump is a single-page web app for emptying your head and then doing the rig
 | **React 19** + **TypeScript** (strict) | UI | Uses `useSyncExternalStore` for the store. Strict TS (`noUnusedLocals` and similar) catches mistakes at build time. |
 | **Vite 8** | Dev server and bundler | Fast HMR. `base` comes from `VITE_BASE`, so one build can target a sub-path host such as GitHub Pages. |
 | **Tailwind CSS v4** (`@tailwindcss/vite`) | Styling | Utility classes plus semantic colour tokens (`bg-card`, `text-ink`) defined once in [src/index.css](src/index.css) and switched per theme. |
-| **react-router v7** | Routing (`/`, `/today`, `/habits`, `/focus`, `/shutdown`, `/rules`, `/history`, `/login`, `/signup`, `/forgot-password`, `/reset-password`) | Declarative route guards, and `basename` for sub-path deploys. |
+| **react-router v7** | Routing (`/`, `/today`, `/habits`, `/compass`, `/focus`, `/shutdown`, `/rules`, `/history`, `/login`, `/signup`, `/forgot-password`, `/reset-password`) | Declarative route guards, and `basename` for sub-path deploys. |
 | **@dnd-kit** (core, sortable, utilities) | Drag reorder | Accessible: keyboard sensor, screen-reader announcements, touch sensor with long-press. |
 | **@supabase/supabase-js** | Auth, Postgres, Realtime | Free hosted backend. Row-level security lets the anon key be public. |
 | **sonner** | Toasts (errors, Undo, confirmations) | Toasts with action buttons; theme-aware. |
@@ -292,6 +293,7 @@ Why one table: the owner can't easily run a migration every time a feature chang
 | `rule` | null | random; the 15 starter rules use `stableId('rule','seed',userId,i)` | `Rule`: ifText, thenText, reason, active, order |
 | `settings` | null | `stableId('settings',userId)` | `PlanSettings`: blockCap (2), taskCap (5), dayStartHour (3), rulesSeeded, otherTags (saved names for Other hours) |
 | `habit` | null | random | `Habit`: name, days (weekdays it's due), done (planner days it was logged, sorted), order, startDay |
+| `compass` | null | `stableId('compass',userId)` | `Compass`: answers (prompt id → text, ≤600 chars each), candidates (≤8: title, 1–5 scores, duel wins), fire (the running experiment: title, why, output, minutes, firstAction, cue, startDay, lengthDays, dumpId, runnerUp, sparks[]), past (≤20 finished runs) |
 
 ### 8.3 Architecture
 
@@ -400,3 +402,41 @@ What's on screen all day shapes behaviour, so Today shows the next action and li
 4. Read the data through `useToday()` or `usePlannerState()`.
 
 No migration is needed unless you want server-side constraints or queries on `data`.
+
+### 8.9 Compass: what to do now, and finding a fire
+
+Built for the owner's problem of not knowing what to do, filling time, and feeling no pull toward anything. No tool can promise passion, so Compass is honest about how it works. **Thinking finds a direction; doing lights the fire.** It turns the user's own answers into one direction, then tests that direction in real life with daily data until the numbers give a verdict.
+
+**What should I do right now?** ([RightNow.tsx](src/components/compass/RightNow.tsx), `pickNow` in [lib/compass.ts](src/lib/compass.ts))
+- Three questions: anything in the way (sleepy, hungry, phone loop, restless), energy (low/okay/high) and time free (15 min / 1 h / 2+ h).
+- A blocker gets a **reset** first (nap, real food, phone in another room, empty your head into the Dump). The body comes before willpower.
+- Then **one** answer, with its first two minutes and a reason:
+  - **High energy:** the hardest block in Today first, then the fire.
+  - **Okay:** the fire first, since it's the experiment.
+  - **Low:** the smallest task first, then a 10-minute fire.
+  - High-priority board tiles come after Today's items. Blocks are cut to the time available.
+  - With nothing queued and no fire, the answer is "Find your fire".
+- "Something else" moves to the next pick, with a note not to shop around. **Start in 5** runs a 5-4-3-2-1 countdown (the 5-second rule), then starts the focus block (`/focus`), opens Today, or adds a board tile to Today first.
+
+**Find your fire** ([FindFire.tsx](src/components/compass/FindFire.tsx)). One screen at a time, saved as you go:
+1. **Eight clue prompts** (`COMPASS_PROMPTS`), each with a one-line "why this works": lost time (flow), envy, age 12, rabbit holes, what makes you angry, at 80 (regret minimisation), no fear or money worries, and what people ask you for. At least 3 must be answered.
+2. **Options:** name 2–8 things you could *do*. Short phrases pulled from the answers (`suggestCandidates`) can be added with one tap.
+3. **Score** each option 1–5 on Pull, Curiosity, Regret, Meaning and Fit. Gut signals are weighted higher (2, 1.5, 1.5, 1, 1) → `candidateScore` 0–100.
+4. **Duel:** every pair among the top four, as "you can only do one for two weeks". `fireScore` = 60% score + 40% head-to-head win rate.
+5. **Ranking**, then the **coin test**: a coin "decides" between the top two, and the user picks Relief (keep the coin's pick) or "oh no" (take the other). Required when the top two are within 10 points.
+6. **Commit:** what, why (with the user's own earlier words shown), the 14-day output, daily minutes (15/25/45/60), first physical action, and an "after I…" cue (implementation intention).
+
+**The Spark experiment** (`Planner.lightFire`, [FireCard.tsx](src/components/compass/FireCard.tsx)):
+- Lighting a fire creates a **tile** with `repeat` every day, `defaultType: 'block'`, its minutes and `priority: 'high'`. It then calls `prepareRoutines(today)` and sets today's item's first action. From then on the normal rollover adds the block to Today each day, as a routine, outside the caps. No new scheduling code was needed, and the block gets the focus timer, Study hours and Bookmarks for free.
+- **Spark check** after each session (one per day, `upsertSpark`): energy now (1 Drained … 5 Alive), did time fly, minutes (prefilled from today's focus sessions on the fire's tile, `fireMinutesOn`) and an optional note. When the fire's block is done and no check-in is logged yet, Today shows one quiet line linking to Compass (`SparkNudge`).
+- **Metrics** (`fireStats`): day N of 14 with a dot per day, average energy and its trend (second half minus first, after 4 check-ins), time-flew rate, show-up rate (today counts only once logged), minutes invested, and the **Fire meter** = energy 70% + flow 20% + showing up 10%, labelled Embers / Smouldering / Burning / Blazing. **Drift** shows the Phone / random hours in the hour log over the last 7 days next to the hours the fire asks for.
+- **Verdict** (`verdictOf`), when the days are up or on "Review early":
+  - fewer than 3 check-ins or under 40% shown up → **restart**: a starting problem, not a wrong fire; rerun at ≤15 min.
+  - average energy ≥ 3.5 and not falling → **keep**: run 30 days.
+  - energy 2.5–3.5 → **reshape**: same theme, different form (opens the commit form).
+  - below that → **switch**: test the runner-up.
+
+  Finished runs go to `past` ("Tried before"). `endFire` and relighting dismiss today's open fire item, turn off `repeat`, and clear the tile to History.
+
+Why one undated document: answers, options and a run's check-ins are small (well under the 32 KB cap, with caps on every list), it needs no SQL, and it is outside the 45-day load window, so history is never cut off.
+

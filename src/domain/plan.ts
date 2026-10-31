@@ -15,6 +15,7 @@ export const KIND = {
   rule: 'rule',
   settings: 'settings',
   habit: 'habit',
+  compass: 'compass',
 } as const
 
 export const ALL_KINDS: readonly string[] = Object.values(KIND)
@@ -172,6 +173,83 @@ export interface Habit {
 }
 
 export const MAX_HABIT_NAME = 80
+
+/**
+ * Compass: one undated document per user (`compassId`). It holds the "Find your fire" answers,
+ * the candidate directions with their scores, and the running 14-day Spark experiment.
+ */
+export interface Compass {
+  /** Prompt id (COMPASS_PROMPTS) → the user's answer. */
+  answers: Record<string, string>
+  candidates: Candidate[]
+  fire: Fire | null
+  /** Finished experiments, newest first. */
+  past: PastFire[]
+}
+
+/** The five ways a candidate is scored, each 1–5. */
+export const SCORE_DIMS = ['pull', 'curiosity', 'regret', 'meaning', 'fit'] as const
+export type ScoreDim = (typeof SCORE_DIMS)[number]
+
+export interface Candidate {
+  id: string
+  title: string
+  scores: Partial<Record<ScoreDim, number>>
+  /** Head-to-head picks won in the Duel step. */
+  wins: number
+  /** Head-to-head picks it took part in. */
+  duels: number
+}
+
+/** The direction being tested: a daily block (a recurring tile) and a check-in after each session. */
+export interface Fire {
+  title: string
+  /** One sentence in the user's own words. */
+  why: string
+  /** What will exist at the end that doesn't exist now. */
+  output: string
+  /** Daily minutes. */
+  minutes: number
+  firstAction: string
+  /** "After I ___" cue (implementation intention). */
+  cue: string
+  startDay: string
+  lengthDays: number
+  /** The recurring tile that puts a block in Today every day. */
+  dumpId: string | null
+  runnerUp: string | null
+  sparks: Spark[]
+}
+
+/** One check-in after a session. */
+export interface Spark {
+  day: string
+  minutes: number
+  /** How you felt afterwards, 1 (drained) to 5 (alive). */
+  energy: number
+  /** Time flew. */
+  flow: boolean
+  note: string
+}
+
+export type Verdict = 'keep' | 'reshape' | 'switch' | 'restart'
+
+export interface PastFire {
+  title: string
+  startDay: string
+  endDay: string
+  verdict: Verdict
+  meter: number
+  sparks: number
+}
+
+export const FIRE_DAYS = 14
+export const FIRE_MINUTES = [15, 25, 45, 60] as const
+export const MAX_ANSWER = 600
+export const MAX_CANDIDATES = 8
+export const MAX_FIRE_TEXT = 160
+
+export const emptyCompass = (): Compass => ({ answers: {}, candidates: [], fire: null, past: [] })
 export const EVERY_DAY = [0, 1, 2, 3, 4, 5, 6]
 
 export type Block1Result = 'yes' | 'partly' | 'no'
