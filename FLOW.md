@@ -143,6 +143,12 @@ flowchart LR
    - It shows `<Splash/>` while `!ready` or while the hash has `access_token` but no user yet.
    - If there is still no user, it shows "Link expired" with `error_description` from the hash or query string.
    - On submit it checks the password is 8+ characters and matches the confirmation, then calls `auth.updatePassword` (`sb.auth.updateUser`). Then `clearRecovery()`, `toast.success('Password updated')` and `navigate('/')`.
+5. **Paste-the-link fallback.** Step 3 only works when the Supabase dashboard allows the redirect URL. If it doesn't, the link lands on the Site URL instead, which by default is `http://localhost:3000`, a dead page. So the "Check your inbox" screen, also reachable via "I already have a reset email", renders `PasteLinkReset` in [src/pages/AuthPages.tsx](src/pages/AuthPages.tsx):
+   1. The user pastes the email's link (`…/auth/v1/verify?token=…&type=recovery`), the dead page's address (`…#access_token=…&refresh_token=…`) or a numeric code, then enters the new password twice.
+   2. `auth.resetWithLink({ link, email, password })` in [supabaseBackend.ts](src/data/supabase/supabaseBackend.ts) calls `parseRecoveryInput` ([recoveryLink.ts](src/data/supabase/recoveryLink.ts), which is unit tested).
+   3. A **throwaway** supabase client (`persistSession: false`) runs `setSession` for an address, `verifyOtp({ token_hash, type: 'recovery' })` for a link, or `verifyOtp({ email, token })` for a code. It then calls `updateUser({ password })`.
+   4. The real client calls `signInWithPassword` with the new password, so the app never holds a half-reset session. `PublicOnly` then redirects to `/` and shows the "Password updated" toast.
+   5. If the link has expired or was already used, the user sees "This reset link has expired or was already used. Send a new one."
 
 ### 3.5 Add a dump (or a split list)
 
@@ -284,6 +290,7 @@ The account menu (`UserMenu` in [src/components/AppHeader.tsx](src/components/Ap
 | `auth.onChange` | `sb.auth.onAuthStateChange` (deferred with `setTimeout(0)` to avoid the auth-lock deadlock) | in-memory listener set + `storage` event |
 | `signUp` / `signIn` / `signOut` | `auth.signUp` / `signInWithPassword` / `signOut({scope:'local'})` | users array + session key |
 | `requestPasswordReset` / `updatePassword` | `resetPasswordForEmail` / `updateUser` | throws / re-hash |
+| `resetWithLink` | throwaway client: `verifyOtp`/`setSession` + `updateUser`, then `signInWithPassword` | throws |
 | `listActive` | `select ... status='active' order position, created_at, id` | filter + sort |
 | `listDone` | `select ... status='done' order completed_at desc, id range(...)` | filter + sort + slice |
 | `create` | `insert(...).select(COLUMNS)` | append |
@@ -320,7 +327,7 @@ Other I/O:
 | localStorage blocked | Theme, sort and banner accesses are wrapped in try/catch. The local backend's `getItem`/`setItem` calls are **not** wrapped, so how device-only mode behaves when storage throws is untested/unclear. | various |
 | Double click on a clearing tile / click right after a drop | Guarded by `exitingRef` and `CLICK_AFTER_DRAG_MS` (250 ms). | BoardPage, DumpGrid |
 | Edited dump removed elsewhere | The dialog closes automatically. | BoardPage effect |
-| Expired or invalid reset link | "Link expired" screen with the server's `error_description`. | ResetPasswordPage |
+| Expired or invalid reset link | "Link expired" screen with the server's `error_description`. A pasted link shows an inline "expired or already used" error instead. | ResetPasswordPage, PasteLinkReset |
 | Unknown route | `<Navigate to="/" replace/>`, then the guards take over. | App.tsx |
 | Deep link on GitHub Pages | `404.html` (a copy of `index.html`) boots the SPA. | deploy workflow |
 

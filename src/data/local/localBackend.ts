@@ -115,6 +115,10 @@ export function createLocalBackend(store: KeyValueStore, options: LocalBackendOp
       throw new AppError('Password reset needs the cloud backend. In device-only mode, create a new account instead.')
     },
 
+    async resetWithLink() {
+      throw new AppError('Password reset needs the cloud backend. In device-only mode, create a new account instead.')
+    },
+
     async updatePassword(password) {
       const current = sessionUser()
       if (!current) throw new AppError('You need to be signed in to change your password.')

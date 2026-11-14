@@ -4,6 +4,7 @@ import type { PlannerDoc } from '@/domain/planner'
 import type { AppUser } from '@/domain/user'
 import { AppError, SetupRequiredError } from '../errors'
 import type { AuthApi, Backend, DumpsApi, PlannerApi } from '../types'
+import { parseRecoveryInput } from './recoveryLink'
 
 interface DumpRow {
   id: string
@@ -57,6 +58,13 @@ const toUser = (u: User): AppUser => ({
 function appUrl(path: string): string {
   const base = import.meta.env.BASE_URL.replace(/\/$/, '')
   return new URL(`${base}${path}`, window.location.origin).toString()
+}
+
+function recoveryError(error: AuthError): AppError {
+  if (/expired|invalid|not found/i.test(error.message) || error.code === 'otp_expired') {
+    return new AppError('This reset link has expired or was already used. Send a new one.', { cause: error })
+  }
+  return authError(error)
 }
 
 function authError(error: AuthError): AppError {
@@ -157,6 +165,28 @@ export function createSupabaseBackend(url: string, anonKey: string): Backend {
     async updatePassword(password) {
       const { error } = await sb.auth.updateUser({ password })
       if (error) throw authError(error)
+    },
+
+    async resetWithLink({ link, email, password }) {
+      const parsed = parseRecoveryInput(link)
+      if (!parsed) throw new AppError('Paste the whole link from the reset email (or the address of the page it opened).')
+      if (parsed.kind === 'error') throw new AppError(parsed.message)
+      // A throwaway client verifies the link and sets the password, so the app never sees a
+      // half-reset session; then the real client signs in with the new password.
+      const tmp = createClient(url, anonKey, {
+        auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: 'minddump-recovery' },
+      })
+      const verified =
+        parsed.kind === 'session'
+          ? await tmp.auth.setSession({ access_token: parsed.accessToken, refresh_token: parsed.refreshToken })
+          : parsed.kind === 'code'
+            ? await tmp.auth.verifyOtp({ email: email.trim(), token: parsed.code, type: 'recovery' })
+            : await tmp.auth.verifyOtp({ token_hash: parsed.tokenHash, type: 'recovery' })
+      if (verified.error) throw recoveryError(verified.error)
+      const { data, error } = await tmp.auth.updateUser({ password })
+      if (error) throw authError(error)
+      const signIn = await sb.auth.signInWithPassword({ email: data.user.email ?? email.trim(), password })
+      if (signIn.error) throw authError(signIn.error)
     },
   }
 

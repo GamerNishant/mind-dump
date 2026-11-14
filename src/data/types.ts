@@ -23,6 +23,11 @@ export interface AuthApi {
   signOut(): Promise<void>
   requestPasswordReset(email: string): Promise<void>
   updatePassword(password: string): Promise<void>
+  /**
+   * Finishes a reset from a pasted email link / redirected URL / code and sets [password], then
+   * signs in. Works even when the email link's redirect is misconfigured.
+   */
+  resetWithLink(input: { link: string; email: string; password: string }): Promise<void>
 }
 
 export interface NewDump {

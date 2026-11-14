@@ -249,7 +249,14 @@ export function ForgotPasswordPage() {
 
   if (sent) {
     return (
-      <AuthLayout title="Check your inbox" subtitle={<>If an account exists for <strong className="text-ink">{email.trim()}</strong>, a reset link is on its way.</>}>
+      <AuthLayout
+        title="Check your inbox"
+        subtitle={email.trim() ? <>If an account exists for <strong className="text-ink">{email.trim()}</strong>, a reset link is on its way.</> : undefined}
+      >
+        <PasteLinkReset email={email} />
+        <button type="button" onClick={() => setSent(false)} className={cn('mt-6 block text-sm', linkClass)}>
+          Send another email
+        </button>
         {back}
       </AuthLayout>
     )
@@ -264,8 +271,58 @@ export function ForgotPasswordPage() {
           Send reset link
         </Button>
       </form>
+      <button type="button" onClick={() => setSent(true)} className={cn('mt-6 block text-sm', linkClass)}>
+        I already have a reset email
+      </button>
       {back}
     </AuthLayout>
+  )
+}
+
+/**
+ * Finish the reset here by pasting the email's link (or the address of the page it opened), so a
+ * misconfigured redirect (e.g. the link landing on localhost) can't block the reset.
+ */
+function PasteLinkReset({ email }: { email: string }) {
+  const { auth } = useAuth()
+  const navigate = useNavigate()
+  const [link, setLink] = useState('')
+  const [password, setPassword] = useState('')
+  const [confirm, setConfirm] = useState('')
+  const [error, setError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+
+  const onSubmit = async (e: FormEvent) => {
+    e.preventDefault()
+    setError(null)
+    if (!link.trim()) return setError('Paste the link from the email first.')
+    if (password.length < MIN_PASSWORD) return setError(`Use at least ${MIN_PASSWORD} characters.`)
+    if (password !== confirm) return setError("Passwords don't match.")
+    setSubmitting(true)
+    try {
+      await auth.resetWithLink({ link, email, password })
+      toast.success('Password updated')
+      navigate('/', { replace: true })
+    } catch (err) {
+      setError(errorMessage(err))
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form onSubmit={onSubmit} noValidate className="space-y-4">
+      <p className="text-sm text-ink-muted">
+        Tap the link in the email. If it opens a page that doesn't load, copy that page's address. You can also long-press the
+        email's button and copy the link. Paste it here and choose a new password.
+      </p>
+      <FormError message={error} />
+      <TextField label="Link from the email" autoComplete="off" spellCheck={false} value={link} onChange={(e) => setLink(e.target.value)} />
+      <PasswordField label="New password" autoComplete="new-password" value={password} onChange={(e) => setPassword(e.target.value)} hint={`At least ${MIN_PASSWORD} characters.`} />
+      <PasswordField label="Confirm new password" autoComplete="new-password" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      <Button type="submit" size="lg" className="w-full" loading={submitting}>
+        Set new password
+      </Button>
+    </form>
   )
 }
 
